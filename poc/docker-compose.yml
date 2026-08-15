@@ -1,0 +1,10 @@
+services:
+  ng-syslog:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ng-syslog-poc
+    ports:
+      - "514:514/udp"
+    volumes:
+      - ./topology:/app/topology

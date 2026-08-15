@@ -1,0 +1,44 @@
+{
+  "ietf-network:networks": {
+    "network": [
+      {
+        "network-id": "l3-topology",
+        "node": [
+          {
+            "node-id": "Core-Router1"
+          },
+          {
+            "node-id": "Dist-Switch1",
+            "ietf-network-topology:supporting-node": [
+              {
+                "network-ref": "l3-topology",
+                "node-ref": "Core-Router1"
+              }
+            ]
+          },
+          {
+            "node-id": "Access-SW1",
+            "ietf-network-topology:supporting-node": [
+              {
+                "network-ref": "l3-topology",
+                "node-ref": "Dist-Switch1"
+              }
+            ]
+          },
+          {
+            "node-id": "Branch-Router2"
+          },
+          {
+            "node-id": "Branch-Access-SW1",
+            "ietf-network-topology:supporting-node": [
+              {
+                "network-ref": "l3-topology",
+                "node-ref": "Branch-Router2"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
