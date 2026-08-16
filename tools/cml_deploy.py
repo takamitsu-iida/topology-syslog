@@ -99,22 +99,27 @@ def _delete_lab(client: httpx.Client, token: str, lab_id: str) -> None:
 
 
 def _get_lab(client: httpx.Client, token: str, lab_id: str) -> dict:
-    resp = client.get(
-        f"/api/v0/labs/{lab_id}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = client.get(f"/api/v0/labs/{lab_id}", headers=headers)
     resp.raise_for_status()
     lab = resp.json()
-    # CML2 は title を別エンドポイントで返す場合がある
+    # CML 2.10+: title は /topology エンドポイントから取得する
     if not lab.get("title"):
         try:
             tr = client.get(
-                f"/api/v0/labs/{lab_id}/title",
-                headers={"Authorization": f"Bearer {token}"},
+                f"/api/v0/labs/{lab_id}/topology",
+                params={"exclude_configurations": "true"},
+                headers=headers,
             )
             if tr.is_success:
-                val = tr.json()
-                lab["title"] = val if isinstance(val, str) else val.get("title", "")
+                topo = tr.json()
+                lab_info = topo.get("lab")
+                if isinstance(lab_info, dict):
+                    # 新スキーマ: {"lab": {"title": ...}, ...}
+                    lab["title"] = lab_info.get("title", "")
+                else:
+                    # 旧スキーマ: {"lab_title": ...}
+                    lab["title"] = topo.get("lab_title", "")
         except Exception:
             pass
     return lab

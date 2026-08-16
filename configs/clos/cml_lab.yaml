@@ -552,6 +552,8 @@ nodes:
         # ens3 (DHCP) 経由でデフォルトルートが確立してからパッケージをインストール
         - apt-get update -y
         - DEBIAN_FRONTEND=noninteractive apt-get install -y jq yq libxml2-utils curl wget git zip unzip make python3-pip python3-venv direnv iptables-persistent rsyslog npm
+        # npm/nodejs インストール後に systemd-resolved が再起動するため DNS 復帰を待つ
+        - until getent hosts github.com >/dev/null 2>&1; do echo "waiting for DNS..."; sleep 3; done
         - curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
         - git clone https://github.com/takamitsu-iida/topology-syslog.git /home/cisco/topology-syslog
         - chown -R cisco:cisco /home/cisco/topology-syslog
