@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -27,6 +28,12 @@ def _load_env(path: str = ".env") -> None:
 
 def main() -> None:
     _load_env()
+
+    log_level = os.getenv("LOG_LEVEL", "info").upper()
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+    )
 
     import uvicorn
     from topology_syslog.api.main import create_app
