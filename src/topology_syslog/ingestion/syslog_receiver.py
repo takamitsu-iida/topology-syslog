@@ -22,9 +22,9 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         msg = parse(data, addr[0])
-        _logger.info("UDP syslog from %s: %s", addr[0], msg.raw_message[:120])
+        _logger.info("UDP syslog from %s: %s", addr[0], msg.message[:120])
         if self._filter and self._filter.is_ignored(msg):
-            _logger.debug("Filtered out: %s", msg.raw_message[:80])
+            _logger.debug("Filtered out: %s", msg.message[:80])
             return
         self._queue.put_nowait(msg)
 
