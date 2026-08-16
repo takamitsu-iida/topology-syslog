@@ -104,7 +104,20 @@ def _get_lab(client: httpx.Client, token: str, lab_id: str) -> dict:
         headers={"Authorization": f"Bearer {token}"},
     )
     resp.raise_for_status()
-    return resp.json()
+    lab = resp.json()
+    # CML2 は title を別エンドポイントで返す場合がある
+    if not lab.get("title"):
+        try:
+            tr = client.get(
+                f"/api/v0/labs/{lab_id}/title",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if tr.is_success:
+                val = tr.json()
+                lab["title"] = val if isinstance(val, str) else val.get("title", "")
+        except Exception:
+            pass
+    return lab
 
 
 def _list_labs(client: httpx.Client, token: str) -> list[str]:
@@ -212,6 +225,9 @@ def cmd_deploy(client: httpx.Client, token: str, args: argparse.Namespace) -> in
     print("[+] 起動コマンド送信完了 (ノードの起動には数分かかる場合があります)")
     try:
         lab = _get_lab(client, token, lab_id)
+        # API がタイトルを返さない場合は YAML から取得済みの値を補完
+        if not lab.get("title") and lab_title:
+            lab["title"] = lab_title
         print("\n[ラボ情報]")
         _print_lab(lab)
     except httpx.HTTPStatusError:

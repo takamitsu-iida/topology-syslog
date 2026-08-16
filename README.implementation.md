@@ -426,7 +426,9 @@ class BaseNotifier(ABC):
 バックエンド
 
 ```bash
-uvicorn topology_syslog.api.main:app --app-dir src --port 8080
+uv sync
+direnv allow
+topology-syslog
 ```
 
 フロントエンド (別ターミナル)
@@ -434,7 +436,6 @@ uvicorn topology_syslog.api.main:app --app-dir src --port 8080
 ```bash
 cd frontend && npm install && npm run dev
 ```
-
 
 ---
 
