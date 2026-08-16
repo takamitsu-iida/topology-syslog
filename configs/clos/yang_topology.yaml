@@ -1,0 +1,133 @@
+# IP CLOS (BGP ファブリック) トポロジー — iida-network-model 形式
+# CML ラボ configs/clos/topology.yaml と対応する YANG 形式ファイル。
+# バックエンドはこのファイルを読み込んでグラフを構築し、根本原因推論に使用する。
+#
+# ノード役割と推論方向:
+#   spine (priority=0) → leaf (priority=3) の方向でエッジを生成する。
+#   Spine がダウンすると下位の Leaf が二次影響ノードと判定される。
+#
+# ホスト名は IOS の hostname コマンドおよび logging origin-id hostname と一致させること。
+
+network-model:
+  physical-layer:
+    device:
+      # ── Spine 層 ──────────────────────────────────────────────────────────
+      - device-id: "Spine1"
+        device-name: "Spine1"
+        device-type: router
+        role: spine
+        loopback: "10.0.0.1/32"
+        interface:
+          - interface-id: "GigabitEthernet0/0"
+            description: "To Leaf1"
+            ip-address: "10.1.11.1/30"
+          - interface-id: "GigabitEthernet0/1"
+            description: "To Leaf2"
+            ip-address: "10.1.12.1/30"
+          - interface-id: "GigabitEthernet0/2"
+            description: "To Leaf3"
+            ip-address: "10.1.13.1/30"
+
+      - device-id: "Spine2"
+        device-name: "Spine2"
+        device-type: router
+        role: spine
+        loopback: "10.0.0.2/32"
+        interface:
+          - interface-id: "GigabitEthernet0/0"
+            description: "To Leaf1"
+            ip-address: "10.2.11.1/30"
+          - interface-id: "GigabitEthernet0/1"
+            description: "To Leaf2"
+            ip-address: "10.2.12.1/30"
+          - interface-id: "GigabitEthernet0/2"
+            description: "To Leaf3"
+            ip-address: "10.2.13.1/30"
+
+      # ── Leaf 層 ──────────────────────────────────────────────────────────
+      - device-id: "Leaf1"
+        device-name: "Leaf1"
+        device-type: switch
+        role: leaf
+        loopback: "10.0.0.11/32"
+        interface:
+          - interface-id: "GigabitEthernet0/0"
+            description: "Uplink to Spine1"
+            ip-address: "10.1.11.2/30"
+          - interface-id: "GigabitEthernet0/1"
+            description: "Uplink to Spine2"
+            ip-address: "10.2.11.2/30"
+          - interface-id: "GigabitEthernet0/2"
+            description: "To Ubuntu"
+            ip-address: "192.168.100.2/30"
+
+      - device-id: "Leaf2"
+        device-name: "Leaf2"
+        device-type: switch
+        role: leaf
+        loopback: "10.0.0.12/32"
+        interface:
+          - interface-id: "GigabitEthernet0/0"
+            description: "Uplink to Spine1"
+            ip-address: "10.1.12.2/30"
+          - interface-id: "GigabitEthernet0/1"
+            description: "Uplink to Spine2"
+            ip-address: "10.2.12.2/30"
+
+      - device-id: "Leaf3"
+        device-name: "Leaf3"
+        device-type: switch
+        role: leaf
+        loopback: "10.0.0.13/32"
+        interface:
+          - interface-id: "GigabitEthernet0/0"
+            description: "Uplink to Spine1"
+            ip-address: "10.1.13.2/30"
+          - interface-id: "GigabitEthernet0/1"
+            description: "Uplink to Spine2"
+            ip-address: "10.2.13.2/30"
+
+    physical-connection:
+      # Spine1 アップリンク
+      - connection-id: "Spine1-Leaf1"
+        endpoint:
+          - device-id: "Spine1"
+            interface-id: "GigabitEthernet0/0"
+          - device-id: "Leaf1"
+            interface-id: "GigabitEthernet0/0"
+
+      - connection-id: "Spine1-Leaf2"
+        endpoint:
+          - device-id: "Spine1"
+            interface-id: "GigabitEthernet0/1"
+          - device-id: "Leaf2"
+            interface-id: "GigabitEthernet0/0"
+
+      - connection-id: "Spine1-Leaf3"
+        endpoint:
+          - device-id: "Spine1"
+            interface-id: "GigabitEthernet0/2"
+          - device-id: "Leaf3"
+            interface-id: "GigabitEthernet0/0"
+
+      # Spine2 アップリンク
+      - connection-id: "Spine2-Leaf1"
+        endpoint:
+          - device-id: "Spine2"
+            interface-id: "GigabitEthernet0/0"
+          - device-id: "Leaf1"
+            interface-id: "GigabitEthernet0/1"
+
+      - connection-id: "Spine2-Leaf2"
+        endpoint:
+          - device-id: "Spine2"
+            interface-id: "GigabitEthernet0/1"
+          - device-id: "Leaf2"
+            interface-id: "GigabitEthernet0/1"
+
+      - connection-id: "Spine2-Leaf3"
+        endpoint:
+          - device-id: "Spine2"
+            interface-id: "GigabitEthernet0/2"
+          - device-id: "Leaf3"
+            interface-id: "GigabitEthernet0/1"

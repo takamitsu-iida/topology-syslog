@@ -18,15 +18,15 @@
 
 ## 進捗サマリー
 
-> 最終更新: 2026-08-15
+> 最終更新: 2026-08-16
 
 | フェーズ | 状態 | 備考 |
 |---|---|---|
 | Phase 0: PoC | ✅ 完了 | アルゴリズム動作確認済み、YANGモデル形式へ移行済み |
-| Phase 1: コアエンジン | ⏳ 未着手 | |
-| Phase 2: ストレージ & API | ⏳ 未着手 | |
-| Phase 3: 外部統合 | ⏳ 未着手 | |
-| Phase 4: UI / ダッシュボード | ⏳ 未着手 | |
+| Phase 1: コアエンジン | ✅ 完了 | 29 tests passed |
+| Phase 2: ストレージ & API | ✅ 完了 | 53 tests passed (累計) |
+| Phase 3: 外部統合 | ✅ 完了 | 72 tests passed (累計) |
+| Phase 4: UI / ダッシュボード | ✅ 完了 | 80 tests passed (累計) |
 | Phase 5: 本番化 | ⏳ 未着手 | |
 
 ---
@@ -36,10 +36,10 @@
 | フェーズ | 名称 | 目的 | 主な成果物 | 状態 |
 |---|---|---|---|---|
 | **Phase 0** | PoC | コアアルゴリズムの動作検証 | `poc/` ディレクトリ一式 | ✅ 完了 |
-| **Phase 1** | コアエンジン | 本番品質のログ受信・相関推論 | `src/topology_syslog/` パッケージ | ⏳ 未着手 |
-| **Phase 2** | ストレージ & API | 永続化層とトポロジー管理API | PostgreSQL スキーマ、FastAPI サーバー | ⏳ 未着手 |
-| **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ⏳ 未着手 |
-| **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド | ⏳ 未着手 |
+| **Phase 1** | コアエンジン | 本番品質のログ受信・相関推論 | `src/topology_syslog/` パッケージ | ✅ 完了 |
+| **Phase 2** | ストレージ & API | 永続化層とトポロジー管理API | PostgreSQL スキーマ、FastAPI サーバー | ✅ 完了 |
+| **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ✅ 完了 |
+| **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド | ✅ 完了 |
 | **Phase 5** | 本番化 | 性能・セキュリティ・可用性 | 負荷テスト結果、本番 docker-compose | ⏳ 未着手 |
 
 ---
@@ -155,7 +155,7 @@ topology-syslog/
 
 ---
 
-## Phase 1: コアエンジン ⏳ 未着手
+## Phase 1: コアエンジン ✅ 完了
 
 ### 目的
 
@@ -275,7 +275,7 @@ class RootCauseInferencer:
 
 ---
 
-## Phase 2: ストレージ & 管理API ⏳ 未着手
+## Phase 2: ストレージ & 管理API ✅ 完了
 
 ### 目的
 
@@ -338,7 +338,7 @@ api:
 
 ---
 
-## Phase 3: 外部統合 ⏳ 未着手
+## Phase 3: 外部統合 ✅ 完了
 
 ### 3-A: トポロジー自動同期 (`topology/sync_engine.py`)
 
@@ -384,7 +384,7 @@ class BaseNotifier(ABC):
 
 ---
 
-## Phase 4: UI / ダッシュボード ⏳ 未着手
+## Phase 4: UI / ダッシュボード ✅ 完了
 
 ### 目的
 
@@ -419,6 +419,22 @@ class BaseNotifier(ABC):
 
 - バックエンド (FastAPI) から WebSocket エンドポイント (`/ws/incidents`) を提供
 - 新規インシデント発生時にフロントエンドへプッシュし、画面を自動更新する
+
+
+### 起動方法
+
+バックエンド
+
+```bash
+uvicorn topology_syslog.api.main:app --app-dir src --port 8080
+```
+
+フロントエンド (別ターミナル)
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
 
 ---
 
