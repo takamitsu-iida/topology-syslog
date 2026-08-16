@@ -15,6 +15,17 @@ from topology_syslog.ingestion.syslog_parser import parse
 router = APIRouter(tags=["ingest"])
 
 
+@router.get("/debug/status")
+async def debug_status(request: Request) -> dict:
+    """pipeline の状態を返す。問題切り分け用。"""
+    return {
+        "topology_loaded": request.app.state.graph is not None,
+        "syslog_port": getattr(request.app.state, "syslog_port", None),
+        "syslog_recv_count": getattr(request.app.state, "syslog_recv_count", 0),
+        "incident_count": request.app.state.store.count(),
+    }
+
+
 class RawMessage(BaseModel):
     source_ip: str = "127.0.0.1"
     raw: str  # RFC 3164 / RFC 5424 形式のシスログ文字列

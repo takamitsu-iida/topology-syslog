@@ -61,6 +61,8 @@ def create_app(
 
         # UDP syslog 受信エンジンを起動（rsyslog が 514 を使うため 1514 等の非特権ポートを使う）
         syslog_queue: asyncio.Queue = asyncio.Queue()
+        app.state.syslog_recv_count = 0
+        app.state.syslog_port = syslog_port
         transport = None
         try:
             transport = await start_receiver(syslog_host, syslog_port, syslog_queue)
@@ -71,11 +73,14 @@ def create_app(
         async def _consume_syslog() -> None:
             while True:
                 msg = await syslog_queue.get()
+                app.state.syslog_recv_count += 1
                 graph = app.state.graph
                 if graph is None:
+                    _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
                     continue
                 try:
                     incidents = app.state.inferencer.infer([msg], graph)
+                    _logger.info("Inferred %d incident(s) from %s", len(incidents), msg.source_ip)
                     for inc in incidents:
                         await asyncio.to_thread(app.state.store.save, inc)
                         await app.state.ws_manager.broadcast({

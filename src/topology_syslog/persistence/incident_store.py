@@ -102,3 +102,7 @@ class IncidentStore:
             row.status = "RESOLVED"
             session.commit()
             return True
+
+    def count(self) -> int:
+        with Session(self._engine) as session:
+            return session.query(_IncidentRow).count()
