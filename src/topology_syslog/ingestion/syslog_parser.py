@@ -9,6 +9,12 @@ from topology_syslog.models import SyslogMessage
 # Cisco IOS 形式 (%FACILITY-SEV-MNEMONIC)
 _CISCO_RE = re.compile(r"%[A-Z0-9_]+-\d+-[A-Z0-9_]+")
 
+# Cisco "logging origin-id hostname" が付与するプレフィックス: "<seq>: <hostname>: "
+_CISCO_ORIGIN_RE = re.compile(r"^\d+:\s+(\S+?):\s+")
+
+# IPアドレス判定
+_IP_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
 # RFC 3164 タイムスタンプ: "Aug  1 10:00:00" または "Aug 15 10:00:00"
 _RFC3164_TS_RE = re.compile(
     r"^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(.*)?$",
@@ -51,6 +57,10 @@ def _try_rfc5424(text: str, source_ip: str, now: datetime) -> SyslogMessage | No
         return None
     hostname = parts[2] if parts[2] != "-" else source_ip
     message = parts[7].strip() if len(parts) > 7 else ""
+    if _IP_RE.match(hostname):
+        origin = _CISCO_ORIGIN_RE.match(message)
+        if origin:
+            hostname = origin.group(1)
     facility, severity = pri >> 3, pri & 7
     return SyslogMessage(
         received_at=now,
@@ -73,6 +83,11 @@ def _try_rfc3164(text: str, source_ip: str, now: datetime) -> SyslogMessage | No
         return None
     hostname = m.group(2)
     message = (m.group(3) or "").strip()
+    # hostnameがIPアドレスの場合、メッセージ中の "<seq>: <name>: " からノード名を抽出する
+    if _IP_RE.match(hostname):
+        origin = _CISCO_ORIGIN_RE.match(message)
+        if origin:
+            hostname = origin.group(1)
     facility, severity = pri >> 3, pri & 7
     return SyslogMessage(
         received_at=now,
