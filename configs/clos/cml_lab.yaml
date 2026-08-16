@@ -473,7 +473,7 @@ nodes:
   # ── Ubuntu エージェントノード ─────────────────────────────────
   # ens2: Leaf1 との管理セグメント (192.168.100.1/30)
   # ens3: external-connector — Internetアクセス (DHCPでアドレス取得)
-  # ens4: HyperV ホスト接続 (192.168.0.100/24)
+  # ens4: HyperV ホスト接続 (192.168.0.110/24)
   - id: "n5"
     label: "Ubuntu"
     node_definition: "ubuntu"
@@ -534,7 +534,7 @@ nodes:
                   dhcp4: true
                 ens4:
                   addresses:
-                    - 192.168.0.100/24
+                    - 192.168.0.110/24
 
         - path: /etc/rsyslog.d/10-network-devices.conf
           permissions: "0644"
@@ -716,3 +716,36 @@ links:
     n2: "n7"
     i2: "i0"
     label: "Ubuntu-Bridge1"
+
+  # ────────────────────────────────────────────────────────────
+annotations:
+  - border_color: '#00000000'
+    border_style: ''
+    color: '#808080FF'
+    rotation: 0
+    text_bold: false
+    text_content: 192.168.0.110
+    text_font: monospace
+    text_italic: false
+    text_size: 12
+    text_unit: pt
+    thickness: 1
+    type: text
+    x1: -480.0
+    y1: 240.0
+    z_index: 0
+  - border_color: '#00000000'
+    border_style: ''
+    color: '#808080FF'
+    rotation: 0
+    text_bold: false
+    text_content: 192.168.100.1
+    text_font: monospace
+    text_italic: false
+    text_size: 12
+    text_unit: pt
+    thickness: 1
+    type: text
+    x1: -280.0
+    y1: 160.0
+    z_index: 1
