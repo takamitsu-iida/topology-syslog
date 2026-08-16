@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
+    host: true,   // 0.0.0.0 でリッスン（VM外からアクセス可能）
     proxy: {
       // バックエンド API (http://localhost:8080) へ転送
       '/incidents': 'http://localhost:8080',
