@@ -49,6 +49,7 @@ def main() -> None:
         cors_origins=cors_origins,
         syslog_host=os.getenv("SYSLOG_HOST", "0.0.0.0"),
         syslog_port=int(os.getenv("SYSLOG_PORT", "1514")),
+        window_sec=int(os.getenv("WINDOW_SEC", "30")),
     )
 
     uvicorn.run(

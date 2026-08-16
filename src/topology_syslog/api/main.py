@@ -32,6 +32,7 @@ def create_app(
     ignore_patterns: list[str] | None = None,
     syslog_host: str = "0.0.0.0",
     syslog_port: int = 1514,
+    window_sec: int = 30,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -71,16 +72,27 @@ def create_app(
             _logger.warning("Syslog UDP receiver could not start: %s", exc)
 
         async def _consume_syslog() -> None:
-            while True:
-                msg = await syslog_queue.get()
-                app.state.syslog_recv_count += 1
+            buffer: list = []
+            flush_task: asyncio.Task | None = None
+
+            async def _flush_after_delay() -> None:
+                nonlocal flush_task
+                await asyncio.sleep(window_sec)
+                flush_task = None
+                if not buffer:
+                    return
+                msgs = buffer.copy()
+                buffer.clear()
                 graph = app.state.graph
                 if graph is None:
                     _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
-                    continue
+                    return
                 try:
-                    incidents = app.state.inferencer.infer([msg], graph)
-                    _logger.info("Inferred %d incident(s) from %s", len(incidents), msg.source_ip)
+                    incidents = app.state.inferencer.infer(msgs, graph)
+                    _logger.info(
+                        "Inferred %d incident(s) from %d syslog(s)",
+                        len(incidents), len(msgs),
+                    )
                     for inc in incidents:
                         await asyncio.to_thread(app.state.store.save, inc)
                         await app.state.ws_manager.broadcast({
@@ -88,7 +100,14 @@ def create_app(
                             "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
                         })
                 except Exception:
-                    _logger.exception("Error processing syslog message")
+                    _logger.exception("Error processing syslog messages")
+
+            while True:
+                msg = await syslog_queue.get()
+                app.state.syslog_recv_count += 1
+                buffer.append(msg)
+                if flush_task is None:
+                    flush_task = asyncio.create_task(_flush_after_delay())
 
         consumer = asyncio.create_task(_consume_syslog())
         yield
