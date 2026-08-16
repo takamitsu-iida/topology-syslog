@@ -180,7 +180,7 @@ services:
 
 ### ステップ 1: コンテナの起動
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 *ログに `[INIT] Topology loaded...` および `Syslog Receiver listening...`
 と表示されれば準備完了です。*

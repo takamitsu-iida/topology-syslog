@@ -32,19 +32,44 @@ class CorrelatorEngine:
     # トポロジーロード
     # ------------------------------------------------------------------
 
+    # デバイスロールの上流優先度 (値が小さいほど上流側)
+    _ROLE_PRIORITY: dict[str, int] = {
+        "border": 0,
+        "spine":  0,
+        "core":   1,
+        "distribution": 2,
+        "access": 3,
+        "leaf":   3,
+        "oob":    4,
+        "other":  5,
+    }
+
     def _load_topology(self, path: str) -> None:
         with open(path) as f:
             data = json.load(f)
 
-        networks = data.get("ietf-network:networks", {}).get("network", [])
-        for net in networks:
-            for node in net.get("node", []):
-                child = node["node-id"]
-                self.G.add_node(child)
-                # 親ノード（supporting-node）からのエッジ: 親 → 子 (上流 → 下流)
-                for sup in node.get("ietf-network-topology:supporting-node", []):
-                    parent = sup["node-ref"]
-                    self.G.add_edge(parent, child)
+        physical = data["network-model"]["physical-layer"]
+
+        # デバイス一覧とロールを収集
+        role_of: dict[str, int] = {}
+        for dev in physical.get("device", []):
+            dev_id = dev["device-id"]
+            role_str = dev.get("role", "other")
+            role_of[dev_id] = self._ROLE_PRIORITY.get(role_str, 5)
+            self.G.add_node(dev_id)
+
+        # 物理接続から有向エッジを生成 (上流 → 下流)
+        for conn in physical.get("physical-connection", []):
+            eps = conn.get("endpoint", [])
+            if len(eps) != 2:
+                continue
+            a, b = eps[0]["device-id"], eps[1]["device-id"]
+            pri_a = role_of.get(a, 5)
+            pri_b = role_of.get(b, 5)
+            if pri_a <= pri_b:
+                self.G.add_edge(a, b)  # a が上流
+            else:
+                self.G.add_edge(b, a)  # b が上流
 
         print(f"[INIT] Topology loaded — nodes: {list(self.G.nodes)}")
         print(f"[INIT]               edges: {list(self.G.edges)}")

@@ -6,16 +6,41 @@
 
 ---
 
+## 進捗ステータス凡例
+
+| マーク | 意味 |
+|---|---|
+| ✅ | 完了 |
+| 🔄 | 進行中 |
+| ⏳ | 未着手 |
+
+---
+
+## 進捗サマリー
+
+> 最終更新: 2026-08-15
+
+| フェーズ | 状態 | 備考 |
+|---|---|---|
+| Phase 0: PoC | ✅ 完了 | アルゴリズム動作確認済み、YANGモデル形式へ移行済み |
+| Phase 1: コアエンジン | ⏳ 未着手 | |
+| Phase 2: ストレージ & API | ⏳ 未着手 | |
+| Phase 3: 外部統合 | ⏳ 未着手 | |
+| Phase 4: UI / ダッシュボード | ⏳ 未着手 | |
+| Phase 5: 本番化 | ⏳ 未着手 | |
+
+---
+
 ## 実装フェーズ一覧
 
-| フェーズ | 名称 | 目的 | 主な成果物 |
-|---|---|---|---|
-| **Phase 0** | PoC | コアアルゴリズムの動作検証 | `poc/` ディレクトリ一式 |
-| **Phase 1** | コアエンジン | 本番品質のログ受信・相関推論 | `src/topology_syslog/` パッケージ |
-| **Phase 2** | ストレージ & API | 永続化層とトポロジー管理API | PostgreSQL スキーマ、FastAPI サーバー |
-| **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier |
-| **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド |
-| **Phase 5** | 本番化 | 性能・セキュリティ・可用性 | 負荷テスト結果、本番 docker-compose |
+| フェーズ | 名称 | 目的 | 主な成果物 | 状態 |
+|---|---|---|---|---|
+| **Phase 0** | PoC | コアアルゴリズムの動作検証 | `poc/` ディレクトリ一式 | ✅ 完了 |
+| **Phase 1** | コアエンジン | 本番品質のログ受信・相関推論 | `src/topology_syslog/` パッケージ | ⏳ 未着手 |
+| **Phase 2** | ストレージ & API | 永続化層とトポロジー管理API | PostgreSQL スキーマ、FastAPI サーバー | ⏳ 未着手 |
+| **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ⏳ 未着手 |
+| **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド | ⏳ 未着手 |
+| **Phase 5** | 本番化 | 性能・セキュリティ・可用性 | 負荷テスト結果、本番 docker-compose | ⏳ 未着手 |
 
 ---
 
@@ -105,7 +130,7 @@ topology-syslog/
 
 ---
 
-## Phase 0: PoC (動作原理の検証)
+## Phase 0: PoC (動作原理の検証) ✅ 完了
 
 ### 目的
 
@@ -113,23 +138,24 @@ topology-syslog/
 
 ### 実装タスク
 
-| # | タスク | 詳細 |
-|---|---|---|
-| 0-1 | `poc/topology/l3_topology.json` 作成 | `Core-Router1 → Dist-Switch1 → Access-SW1` の3ノードDAGをRFC 8345形式で記述 |
-| 0-2 | `poc/src/main.py` 実装 | README.poc.md のコードをそのまま実装。UDP 514受信 + 10秒ウィンドウ + nx.ancestors |
-| 0-3 | `poc/test_sender.py` 作成 | 3機器から連鎖障害ログをUDP送信するシミュレータ |
-| 0-4 | `poc/Dockerfile` & `poc/docker-compose.yml` 作成 | python:3.12-slim ベースの単一コンテナ |
-| 0-5 | PoC動作確認 | `docker compose up --build` → `test_sender.py` 実行 → 1件のインシデントに集約されることを確認 |
-| 0-6 | ノイズ混入テスト | 無関係な `Branch-Router2` からのログを混入し、2件のインシデントに正しく分離されることを確認 |
+| # | タスク | 詳細 | 状態 |
+|---|---|---|---|
+| 0-1 | `poc/topology/l3_topology.json` 作成 | `Core-Router1 → Dist-Switch1 → Access-SW1` の3ノードDAGを `iida-network-model` 形式で記述 | ✅ |
+| 0-2 | `poc/src/main.py` 実装 | UDP 514受信 + 10秒ウィンドウ + nx.ancestors、YANGモデル形式トポロジ読み込み対応 | ✅ |
+| 0-3 | `poc/test_sender.py` 作成 | 3機器から連鎖障害ログをUDP送信するシミュレータ | ✅ |
+| 0-4 | `poc/Dockerfile` & `poc/docker-compose.yml` 作成 | python:3.12-slim ベースの単一コンテナ | ✅ |
+| 0-5 | PoC動作確認 | `docker compose up --build` → `test_sender.py` 実行 → 1件のインシデントに集約されることを確認 | ✅ |
+| 0-6 | ノイズ混入テスト | 無関係な `Branch-Router2` からのログを混入し、2件のインシデントに正しく分離されることを確認 | ✅ |
 
 ### 完了条件
 
-- 3件の生ログが「1件の根本原因インシデント」に集約されてコンソール出力される
-- 関係のないログは別インシデントとして独立して出力される
+- [x] 3件の生ログが「1件の根本原因インシデント」に集約されてコンソール出力される
+- [x] 関係のないログは別インシデントとして独立して出力される
+- [x] トポロジーが `iida-network-model` YANG形式 (`network-model` / `physical-layer`) に準拠している
 
 ---
 
-## Phase 1: コアエンジン
+## Phase 1: コアエンジン ⏳ 未着手
 
 ### 目的
 
@@ -186,13 +212,13 @@ async def start_receiver(host, port, queue: asyncio.Queue): ...
 
 ### 1-D: YANGローダー (`topology/yang_loader.py`)
 
-- PoC では RFC 8345 (ietf-network) 形式のJSONを使用
-- 本フェーズでは既存の `yang/` 配下の `iida-network-model` 形式のYAMLも読み込めるよう拡張する
-- NetworkX の `DiGraph` に変換する際、エッジは **「上流 → 下流」の依存方向** で統一する
+- PoC では `iida-network-model` 形式のJSON（`network-model` / `physical-layer`）を使用
+- 本フェーズでは同形式のYAMLファイル (`yang/examples/`) も読み込めるよう拡張する
+- NetworkX の `DiGraph` に変換する際、エッジは **「上流 → 下流」の依存方向** で統一する（`role` フィールドで方向決定）
 
 ```python
 class TopologyLoader:
-    def load_from_ietf_json(self, path: str) -> nx.DiGraph: ...
+    def load_from_iida_json(self, path: str) -> nx.DiGraph: ...
     def load_from_iida_yaml(self, path: str) -> nx.DiGraph: ...
 ```
 
@@ -249,7 +275,7 @@ class RootCauseInferencer:
 
 ---
 
-## Phase 2: ストレージ & 管理API
+## Phase 2: ストレージ & 管理API ⏳ 未着手
 
 ### 目的
 
@@ -312,7 +338,7 @@ api:
 
 ---
 
-## Phase 3: 外部統合
+## Phase 3: 外部統合 ⏳ 未着手
 
 ### 3-A: トポロジー自動同期 (`topology/sync_engine.py`)
 
@@ -358,7 +384,7 @@ class BaseNotifier(ABC):
 
 ---
 
-## Phase 4: UI / ダッシュボード
+## Phase 4: UI / ダッシュボード ⏳ 未着手
 
 ### 目的
 
@@ -396,7 +422,7 @@ class BaseNotifier(ABC):
 
 ---
 
-## Phase 5: 本番化
+## Phase 5: 本番化 ⏳ 未着手
 
 ### 5-A: 高性能ログ受信 (Vector 統合)
 
