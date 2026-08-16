@@ -40,6 +40,8 @@ def main() -> None:
         topology_source=os.getenv("TOPOLOGY_SOURCE", "iida-yaml"),
         ignore_file=os.getenv("SYSLOG_IGNORE_FILE") or None,
         cors_origins=cors_origins,
+        syslog_host=os.getenv("SYSLOG_HOST", "0.0.0.0"),
+        syslog_port=int(os.getenv("SYSLOG_PORT", "1514")),
     )
 
     uvicorn.run(
@@ -48,6 +50,9 @@ def main() -> None:
         port=int(os.getenv("API_PORT", "8080")),
         log_level=os.getenv("LOG_LEVEL", "info").lower(),
     )
+
+
+# create_app に syslog_host/syslog_port を渡す必要があるため main() を更新
 
 
 if __name__ == "__main__":

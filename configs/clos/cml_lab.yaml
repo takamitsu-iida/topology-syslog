@@ -545,6 +545,8 @@ nodes:
             template(name="NetworkDeviceRaw" type="string" string="%rawmsg%\n")
             if $fromhost-ip != "127.0.0.1" then {
                 *.* action(type="omfile" file="/var/log/network-syslog.log" template="NetworkDeviceRaw" fileCreateMode="0644")
+                # topology-syslog バックエンドへ転送 (ポート 1514 は非特権で bind 可能)
+                *.* action(type="omfwd" target="127.0.0.1" port="1514" protocol="udp")
             }
 
       runcmd:
