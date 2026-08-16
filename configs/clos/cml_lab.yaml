@@ -556,8 +556,11 @@ nodes:
         - DEBIAN_FRONTEND=noninteractive apt-get install -y jq yq libxml2-utils curl wget git zip unzip make python3-pip python3-venv direnv iptables-persistent rsyslog npm
         # npm/nodejs インストール後に systemd-resolved が再起動するため DNS 復帰を待つ
         - until getent hosts github.com >/dev/null 2>&1; do echo "waiting for DNS..."; sleep 3; done
+        # uv
         - curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+        # git clone topology-syslog (バックエンド) と iida-network-model (YANG モジュール)
         - git clone https://github.com/takamitsu-iida/topology-syslog.git /home/cisco/topology-syslog
+        - git submodule add https://github.com/takamitsu-iida/iida-network-model.git /home/cisco/topology-syslog/yang
         - chown -R cisco:cisco /home/cisco/topology-syslog
 
         # Resize terminal window
