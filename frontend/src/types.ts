@@ -8,7 +8,12 @@ export interface Incident {
   secondary_nodes: string[]
   raw_log_count: number
   raw_logs: string[]
-  status: 'OPEN' | 'RESOLVED'
+  status: 'OPEN' | 'RESOLVED' | 'FLAPPING'
+}
+
+export interface AiReport {
+  incident_id: string
+  report: string
 }
 
 export interface IncidentListResponse {

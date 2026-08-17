@@ -18,7 +18,7 @@
 
 ## 進捗サマリー
 
-> 最終更新: 2026-08-16
+> 最終更新: 2026-08-17
 
 | フェーズ | 状態 | 備考 |
 |---|---|---|
@@ -28,7 +28,9 @@
 | Phase 3: 外部統合 | ✅ 完了 | 72 tests passed (累計) |
 | Phase 4: UI / ダッシュボード | ✅ 完了 | 80 tests passed (累計) |
 | Phase 5: 本番化 | ⏳ 未着手 | |
-| Phase 6: BGPピアリングのグラフエッジ化 | ⏳ 未着手 | 2026-08-16 計画策定 |
+| Phase 6: BGPピアリングのグラフエッジ化 | ✅ 完了 | 109 tests passed (累計) |
+| Phase 7: AI 障害レポート | ✅ 完了 | OpenAI/Ollama 対応、RAG+キャッシュ、UI統合 |
+| Phase 8: 推論エンジン強化 | ✅ 完了 | 127 tests passed (累計) |
 
 ---
 
@@ -42,7 +44,9 @@
 | **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ✅ 完了 |
 | **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド | ✅ 完了 |
 | **Phase 5** | 本番化 | 性能・セキュリティ・可用性 | 負荷テスト結果、本番 docker-compose | ⏳ 未着手 |
-| **Phase 6** | BGPピアリングのグラフエッジ化 | iBGP等でトポロジーと一致しないピアもインシデント集約対象にする | `yang_topology.yaml`, `yang_loader.py`, `graph_engine.py`, フロントエンド | ⏳ 未着手 |
+| **Phase 6** | BGPピアリングのグラフエッジ化 | iBGP等でトポロジーと一致しないピアもインシデント集約対象にする | `yang_topology.yaml`, `yang_loader.py`, `graph_engine.py`, フロントエンド | ✅ 完了 |
+| **Phase 7** | AI 障害レポート | LLM による障害分析レポート自動生成（RAG + クエリキャッシュ） | `ai/` モジュール、`/incidents/{id}/report` API、UI ボタン | ✅ 完了 |
+| **Phase 8** | 推論エンジン強化 | 集約精度・カバレッジ・応答速度を段階的に改善 | `root_cause_inferencer.py`, `graph_engine.py` | ✅ 完了 |
 
 ---
 
@@ -610,3 +614,182 @@ Leaf1 の descendants → {Leaf2} # BGPエッジ経由
 - [ ] iBGP Leaf-Leaf の両ノードからSYSLOGが来た場合に1件のインシデントに集約される
 - [ ] フロントエンドのトポロジービューでBGPエッジが破線表示される
 - [ ] 既存の物理エッジ由来の集約が壊れていないこと（既存テストがパスすること）
+
+---
+
+## Phase 7: AI 障害レポート ✅ 完了
+
+### 目的
+
+インシデントに対して LLM（OpenAI / Ollama）を使い障害分析レポートを自動生成する。
+同種の障害は再問い合わせせずキャッシュから返し、過去インシデントを RAG として蓄積することで精度を継続的に向上させる。
+
+### アーキテクチャ
+
+```
+インシデント詳細 UI
+        │ POST /incidents/{id}/report
+        ▼
+ReportGenerator.generate(incident)
+        │
+        ├─ QueryCache.get(fingerprint)  ─── HIT → キャッシュ済みレポートを即返却
+        │                                   MISS ↓
+        ├─ RAGStore.search_similar()        過去の類似インシデントを ChromaDB で検索
+        │
+        ├─ LLMClient.ask(prompt)            OpenAI または Ollama へ問い合わせ
+        │
+        ├─ QueryCache.set(fingerprint, report)
+        └─ RAGStore.add(incident)
+```
+
+**キャッシュキー（フィンガープリント）**: `root_cause_node` + Cisco IOS イベント種別（`%FAC-SEV-MNEM`）+ `secondary_nodes` の SHA-256。
+同じノードで同じ種別の障害が再発した場合、LLM への問い合わせをスキップする。
+
+### 実装タスク
+
+| # | タスク | 対象ファイル | 状態 |
+|---|---|---|---|
+| 7-1 | `ai/llm_client.py` — OpenAI / Ollama 抽象クライアント | `ai/llm_client.py` | ✅ |
+| 7-2 | `ai/query_cache.py` — SQLite キャッシュ（TTL 付き） | `ai/query_cache.py` | ✅ |
+| 7-3 | `ai/rag_store.py` — ChromaDB セマンティック類似検索 | `ai/rag_store.py` | ✅ |
+| 7-4 | `ai/report_generator.py` — RAG + キャッシュ + LLM オーケストレーター | `ai/report_generator.py` | ✅ |
+| 7-5 | `POST /incidents/{id}/report` エンドポイント | `api/routes/ai.py` | ✅ |
+| 7-6 | `api/main.py` に AI コンポーネントを組み込み（`AI_ENABLED` 環境変数） | `api/main.py` | ✅ |
+| 7-7 | UI: インシデント詳細画面に「AI レポートを生成」ボタンを追加 | `pages/IncidentDetail.tsx` | ✅ |
+| 7-8 | テスト（chromadb/openai 不要、RAGStore はモック化） | `tests/test_ai_report.py` | ✅ |
+
+### 主な環境変数
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `AI_ENABLED` | `false` | `true` にすると AI コンポーネントを初期化 |
+| `LLM_PROVIDER` | `openai` | `openai` または `ollama` |
+| `OPENAI_API_KEY` | — | OpenAI API キー |
+| `OPENAI_MODEL` | `gpt-4o-mini` | 使用するモデル名 |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama エンドポイント |
+| `OLLAMA_MODEL` | `llama3` | Ollama モデル名 |
+| `AI_RAG_PATH` | `.chromadb` | ChromaDB の永続化ディレクトリ |
+| `AI_CACHE_TTL_DAYS` | `7` | キャッシュの有効期限（日） |
+
+### 完了条件
+
+- [x] `POST /incidents/{id}/report` でレポートが生成される
+- [x] 同一フィンガープリントの 2 回目のリクエストはキャッシュから返る（LLM 呼び出しなし）
+- [x] RAG に過去インシデントが蓄積され、類似事例がプロンプトに含まれる
+- [x] `AI_ENABLED=false`（デフォルト）のとき既存動作に影響しない
+- [x] UI に「AI レポートを生成」ボタンが表示され、Markdown レンダリングされる
+
+---
+
+## Phase 8: 推論エンジン強化 ✅ 完了
+
+### 目的
+
+現行の根本原因推論エンジンが持つ4つの構造的課題を段階的に解消し、集約精度・カバレッジ・応答速度を改善する。
+
+### 背景と課題
+
+| # | 課題 | 影響 |
+|---|---|---|
+| 1 | タイムウィンドウが固定（30秒）で因果順序を無視 | 最初に届いたログが根本原因でも同格扱い |
+| 2 | イベントの重み付けがなく低深刻度ログが根本原因候補に混入 | 誤集約・誤通知 |
+| 3 | フラッピングを検出できず繰り返し障害が複数インシデントになる | アラートストームを助長 |
+| 4 | 完全クラッシュしたノードはログを送れないため根本原因として識別できない | 見逃し障害 |
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 8-1 | A: タイムスタンプ優先度 | ウィンドウ内の `received_at` を見て根本原因候補が複数いる場合に最も早いものを優先 | `root_cause_inferencer.py` | ✅ |
+| 8-2 | B: Severity フィルター | `INFERENCE_SEVERITY_THRESHOLD`（デフォルト NOTICE=5）を超えるログのみ推論に使用、低深刻度は記録のみ | `root_cause_inferencer.py`, `__main__.py` | ✅ |
+| 8-3 | C: フラッピング検出 | 同一ノード × 同一 `%FAC-SEV-MNEM` が `FLAPPING_THRESHOLD`（デフォルト 3）回以上 → `Incident.status="FLAPPING"` | `models.py`, `root_cause_inferencer.py`, `incident_store.py` | ✅ |
+| 8-4 | D: サイレントセカンダリ推論 | `logged_nodes` の共通祖先でログを出していないノードを「サイレント根本原因」として候補に追加 | `graph_engine.py`, `root_cause_inferencer.py` | ✅ |
+| 8-5 | E: アダプティブタイムウィンドウ | 5 秒以内に 5 件以上のバーストを検知したとき `window_sec` を自動延長（最大 `WINDOW_SEC_MAX`） | `api/main.py`, `__main__.py` | ✅ |
+| 8-6 | テスト | 各サブフェーズの動作シナリオを網羅 | `tests/test_root_cause.py`, `tests/test_adaptive_window.py` | ✅ |
+
+### 各サブフェーズの設計詳細
+
+#### 8-1: タイムスタンプ優先度（因果順序）
+
+```python
+# 根本原因候補が複数いる場合、最初に届いたノードを優先
+first_seen = {m.hostname: m.received_at for m in reversed(messages)
+              if graph.node_exists(m.hostname)}
+root_causes.sort(key=lambda n: first_seen.get(n, now))
+```
+
+#### 8-2: Severity フィルター
+
+```python
+# 環境変数 INFERENCE_SEVERITY_THRESHOLD=5 (NOTICE)
+# severity 0=EMERG … 7=DEBUG。値が小さいほど深刻。
+active = [m for m in messages if m.severity <= threshold]
+# active だけを推論に使い、除外されたものは raw_logs にのみ記録
+```
+
+#### 8-3: フラッピング検出
+
+```python
+# Incident.status の値を拡張
+STATUS_OPEN      = "OPEN"
+STATUS_RESOLVED  = "RESOLVED"
+STATUS_FLAPPING  = "FLAPPING"  # 追加
+
+# 同一ノード × 同一イベント種別が N 回以上 → FLAPPING
+event_counts = Counter(
+    (m.hostname, _extract_event_type(m.message))
+    for m in messages if graph.node_exists(m.hostname)
+)
+flapping_nodes = {node for (node, _), cnt in event_counts.items()
+                  if cnt >= FLAPPING_THRESHOLD}
+```
+
+#### 8-4: サイレントセカンダリ推論（最重要）
+
+ログを送れなかった上流ノード（完全クラッシュ等）を根本原因として推論する。
+
+```
+状況: Spine1 がクラッシュしてログ送信不可
+      Leaf1, Leaf2, Leaf3 が同時に %BGP-5-ADJCHANGE を報告
+
+現状の推論:
+  Leaf1, Leaf2, Leaf3 は互いに祖先を持たない → 3 件の独立インシデント（誤り）
+
+改善後の推論:
+  Leaf1, Leaf2, Leaf3 の共通祖先 = Spine1
+  Spine1 はログを出していないが閾値（60%以上の子孫がログ）を超えている
+  → Spine1 を「サイレント根本原因」と判定 → 1 件のインシデント
+```
+
+```python
+def find_silent_root_candidates(
+    logged_nodes: set[str],
+    graph: GraphEngine,
+    min_coverage: float = 0.6,
+) -> list[str]:
+    coverage: dict[str, int] = {}
+    for node in logged_nodes:
+        for ancestor in graph.get_ancestors(node):
+            if ancestor not in logged_nodes:
+                coverage[ancestor] = coverage.get(ancestor, 0) + 1
+    threshold = max(2, int(len(logged_nodes) * min_coverage))
+    return [n for n, cnt in coverage.items() if cnt >= threshold]
+```
+
+#### 8-5: アダプティブタイムウィンドウ
+
+```python
+BURST_WINDOW_SEC   = 5    # バースト判定ウィンドウ（秒）
+BURST_THRESHOLD    = 5    # バースト判定件数
+WINDOW_SEC_EXTEND  = 2.0  # バースト時にウィンドウを何倍に延長するか
+WINDOW_SEC_MAX     = 120  # 最大ウィンドウ（秒）
+```
+
+### 完了条件
+
+- [x] 8-1: 同一ウィンドウに複数の根本原因候補がいる場合、最初に到着したものが選ばれる
+- [x] 8-2: `severity > threshold` のログは推論に使われず `raw_logs` にのみ記録される
+- [x] 8-3: 同一ノードの同一イベントが 3 回以上来ると `FLAPPING` インシデントが生成される
+- [x] 8-4: ログを出していない共通祖先ノードがサイレント根本原因として検出される
+- [x] 8-5: バースト検知時にタイムウィンドウが自動延長される
+- [x] 既存テスト（109件）がすべてパスすること

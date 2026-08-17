@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { getIncident, getTopologyGraph } from '../api/client'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { generateAiReport, getIncident, getTopologyGraph } from '../api/client'
 import { TopologyMap } from '../components/TopologyMap'
 
 export function IncidentDetail() {
@@ -16,6 +17,12 @@ export function IncidentDetail() {
     queryKey: ['topology-graph'],
     queryFn: getTopologyGraph,
     staleTime: 60_000,
+  })
+
+  const [aiReport, setAiReport] = useState<string | null>(null)
+  const { mutate: requestReport, isPending: isReporting, error: reportError } = useMutation({
+    mutationFn: () => generateAiReport(id!),
+    onSuccess: (data) => setAiReport(data.report),
   })
 
   if (isLoading) return <div className="p-4 text-gray-500">読み込み中…</div>
@@ -112,6 +119,55 @@ export function IncidentDetail() {
           </div>
         </div>
       )}
+
+      {/* AI 障害レポート */}
+      <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-gray-700">AI 障害レポート</h2>
+          <button
+            onClick={() => requestReport()}
+            disabled={isReporting}
+            className="rounded bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            {isReporting ? '生成中…' : aiReport ? '再生成' : 'AI レポートを生成'}
+          </button>
+        </div>
+
+        {reportError && (
+          <p className="mt-3 text-sm text-red-600">
+            エラー: {(reportError as Error).message}
+          </p>
+        )}
+
+        {isReporting && !aiReport && (
+          <div className="mt-4 space-y-2 animate-pulse">
+            <div className="h-3 rounded bg-gray-200" />
+            <div className="h-3 w-5/6 rounded bg-gray-200" />
+            <div className="h-3 rounded bg-gray-200" />
+            <div className="h-3 w-4/6 rounded bg-gray-200" />
+          </div>
+        )}
+
+        {aiReport ? (
+          <div className="mt-3 rounded bg-gray-50 p-4 text-sm leading-relaxed text-gray-800">
+            {aiReport.split('\n').map((line, i) => (
+              <p key={i} className={line.startsWith('#') ? 'mt-3 font-semibold' : 'mt-1'}>
+                {line.split(/(\*\*[^*]+\*\*)/).map((seg, j) =>
+                  seg.startsWith('**') && seg.endsWith('**')
+                    ? <strong key={j}>{seg.slice(2, -2)}</strong>
+                    : <span key={j}>{seg}</span>
+                )}
+              </p>
+            ))}
+          </div>
+        ) : (
+          !isReporting && !reportError && (
+            <p className="mt-3 text-sm text-gray-400">
+              ボタンをクリックすると AI が障害の原因と対応策をレポートします。
+            </p>
+          )
+        )}
+      </div>
     </div>
   )
 }

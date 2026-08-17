@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from topology_syslog.api.routes.ai import router as ai_router
 from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
 from topology_syslog.api.routes.topology import router as topology_router
@@ -23,6 +25,18 @@ from topology_syslog.topology.yang_loader import TopologyLoader
 _logger = logging.getLogger(__name__)
 
 
+def _burst_detected(
+    buffer: list,
+    burst_window_sec: float,
+    burst_threshold: int,
+) -> bool:
+    """直近 burst_window_sec 秒以内に burst_threshold 件以上のメッセージがあるか。"""
+    if burst_threshold <= 0 or burst_window_sec <= 0:
+        return False
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=burst_window_sec)
+    return sum(1 for m in buffer if m.received_at >= cutoff) >= burst_threshold
+
+
 def create_app(
     database_url: str = "sqlite:///./incidents.db",
     topology_path: str | None = None,
@@ -33,12 +47,24 @@ def create_app(
     syslog_host: str = "0.0.0.0",
     syslog_port: int = 1514,
     window_sec: int = 30,
+    burst_window_sec: float = 5.0,
+    burst_threshold: int = 5,
+    window_extend_factor: float = 2.0,
+    window_sec_max: int = 120,
+    inference_severity_threshold: int = 5,
+    flapping_threshold: int = 3,
+    ai_enabled: bool = False,
+    ai_rag_path: str = ".chromadb",
+    ai_cache_ttl_days: int = 7,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
         app.state.ws_manager = ConnectionManager()
-        app.state.inferencer = RootCauseInferencer()
+        app.state.inferencer = RootCauseInferencer(
+            severity_threshold=inference_severity_threshold,
+            flapping_threshold=flapping_threshold,
+        )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
         extra: list[str] = list(ignore_patterns or [])
         if ignore_file:
@@ -79,7 +105,21 @@ def create_app(
 
             async def _flush_after_delay() -> None:
                 nonlocal flush_task
-                await asyncio.sleep(window_sec)
+                loop = asyncio.get_event_loop()
+                start = loop.time()
+                target = float(window_sec)
+                extended = False
+
+                while loop.time() - start < target:
+                    remaining = target - (loop.time() - start)
+                    await asyncio.sleep(min(float(burst_window_sec), remaining))
+                    if not extended and _burst_detected(buffer, burst_window_sec, burst_threshold):
+                        new_target = min(window_sec * window_extend_factor, float(window_sec_max))
+                        if new_target > target:
+                            _logger.debug("Burst detected — window extended %.0fs → %.0fs", target, new_target)
+                            target = new_target
+                            extended = True
+
                 flush_task = None
                 if not buffer:
                     return
@@ -111,6 +151,20 @@ def create_app(
                 if flush_task is None:
                     flush_task = asyncio.create_task(_flush_after_delay())
 
+        # AI コンポーネント（オプション）— chromadb / openai が未インストールでも起動可能
+        app.state.report_generator = None
+        if ai_enabled:
+            from topology_syslog.ai.llm_client import create_llm_client
+            from topology_syslog.ai.query_cache import QueryCache
+            from topology_syslog.ai.rag_store import RAGStore
+            from topology_syslog.ai.report_generator import ReportGenerator
+
+            llm   = create_llm_client()
+            cache = QueryCache(database_url, ttl_days=ai_cache_ttl_days)
+            rag   = RAGStore(ai_rag_path)
+            app.state.report_generator = ReportGenerator(llm, cache, rag)
+            _logger.info("AI report generator ready (rag_path=%s)", ai_rag_path)
+
         consumer = asyncio.create_task(_consume_syslog())
         yield
         consumer.cancel()
@@ -129,4 +183,5 @@ def create_app(
     app.include_router(topology_router)
     app.include_router(ws_router)
     app.include_router(ingest_router)
+    app.include_router(ai_router)
     return app

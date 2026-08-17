@@ -1,4 +1,4 @@
-import type { Incident, IncidentListResponse, TopologyGraphResponse } from '../types'
+import type { AiReport, Incident, IncidentListResponse, TopologyGraphResponse } from '../types'
 
 /** バックエンド URL: 開発時は Vite proxy が転送する */
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? ''
@@ -11,6 +11,12 @@ async function get<T>(path: string): Promise<T> {
 
 async function put<T>(path: string): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, { method: 'PUT' })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+  return resp.json() as Promise<T>
+}
+
+async function post<T>(path: string): Promise<T> {
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST' })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
   return resp.json() as Promise<T>
 }
@@ -28,3 +34,6 @@ export const resolveIncident = (id: string): Promise<Incident> =>
 
 export const getTopologyGraph = (): Promise<TopologyGraphResponse> =>
   get<TopologyGraphResponse>('/topology/graph')
+
+export const generateAiReport = (id: string): Promise<AiReport> =>
+  post<AiReport>(`/incidents/${encodeURIComponent(id)}/report`)
