@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+frontend/
+poc/
+yang/
+*.db
+.chromadb/
+.env
+.env.*
+*.log
+.pids/
+logs/
+.pytest_cache/
+topology_syslog.egg-info/

@@ -23,15 +23,20 @@ UI_LOG  := $(LOG_DIR)/ui.log
 .PHONY: help
 help:
 	@echo "使用可能なターゲット:"
-	@echo "  make start      バックエンド + フロントエンドを起動"
-	@echo "  make stop       両プロセスを停止"
-	@echo "  make restart    停止してから再起動"
-	@echo "  make status     プロセス状態を確認"
-	@echo "  make logs-api   バックエンドのログを tail -f"
-	@echo "  make logs-ui    フロントエンドのログを tail -f"
-	@echo "  make test       pytest を実行"
-	@echo "  make install    依存パッケージをインストール（uv sync + npm install）"
-	@echo "  make setup      初回セットアップ（uv インストール / サブモジュール / uv sync）"
+	@echo "  make start        バックエンド + フロントエンドを起動（開発モード）"
+	@echo "  make stop         両プロセスを停止"
+	@echo "  make restart      停止してから再起動"
+	@echo "  make status       プロセス状態を確認"
+	@echo "  make logs-api     バックエンドのログを tail -f"
+	@echo "  make logs-ui      フロントエンドのログを tail -f"
+	@echo "  make test         pytest を実行"
+	@echo "  make install      依存パッケージをインストール（uv sync + npm install）"
+	@echo "  make setup        初回セットアップ（uv インストール / サブモジュール / uv sync）"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker-up    Docker Compose でビルド＆起動"
+	@echo "  make docker-down  Docker Compose を停止・削除"
+	@echo "  make docker-build イメージだけ再ビルド"
 	@echo ""
 	@echo "個別操作: start-api / stop-api / start-ui / stop-ui"
 
@@ -145,3 +150,17 @@ setup:
 # ── ディレクトリ自動作成 ──────────────────────────────────────────────────
 $(PID_DIR) $(LOG_DIR):
 	mkdir -p $@
+
+# ── Docker ────────────────────────────────────────────────────────────────
+.PHONY: docker-up docker-down docker-build
+docker-up:
+	docker compose up --build -d
+	@echo ""
+	@echo "  UI  : http://localhost:3000"
+	@echo "  API : http://localhost:8080/docs"
+
+docker-down:
+	docker compose down
+
+docker-build:
+	docker compose build

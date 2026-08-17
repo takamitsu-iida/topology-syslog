@@ -8,7 +8,7 @@
 
 従来のシスログサーバーは、障害時に発生する大量のアラートをそのまま記録するだけです。例えばコアスイッチが1台ダウンすると、そこに繋がる数十台の機器が次々にアラートを送信し、運用者はアラートの洪水の中から真の原因を手作業で探さなければなりません。
 
-**topology-syslog** は YANG モデルで定義されたネットワークトポロジーをインメモリグラフとして保持し、受信した SYSLOG をトポロジー構造にマッピングします。これにより「数百件のアラート」を「1件の根本原因インシデント」に自動変換します。
+**topology-syslog** は YANG モデルで定義されたネットワークトポロジーをインメモリグラフとして保持し、受信した SYSLOG をトポロジー構造にマッピングします。これにより「複数のSYSLOGメッセージ」を「1件の根本原因インシデント」に自動変換します。
 
 ```
 従来:  障害1件 → アラート 87件 → 運用者が手作業でトリアージ
@@ -35,7 +35,7 @@
 
 ## インシデント集約の仕組み
 
-ここがこのシステムの核心です。
+このシステムの核となる部分です。
 
 ### 1. タイムウィンドウバッファ
 
@@ -279,6 +279,8 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 
 ## 起動
 
+### 開発モード（ローカル）
+
 ```bash
 make start        # バックエンド + フロントエンドを同時起動
 
@@ -293,6 +295,60 @@ make logs-ui      # フロントエンドログを tail -f
 
 - Web UI: http://localhost:3000
 - API ドキュメント: http://localhost:8080/docs
+
+### Docker（本番 / 検証環境）
+
+**前提**: Docker および Docker Compose v2 がインストール済みであること。
+
+**1. `.env` を準備する**
+
+```bash
+cp .env.example .env
+# AI レポートを使う場合は OPENAI_API_KEY などを編集
+```
+
+**2. ビルドして起動する**
+
+```bash
+make docker-up
+# または
+docker compose up --build -d
+```
+
+初回は Python パッケージ・npm ビルドのダウンロードが走るため数分かかります。
+
+起動後:
+
+- Web UI: http://localhost:3000
+- API ドキュメント: http://localhost:8080/docs
+
+**3. ログを確認する**
+
+```bash
+docker compose logs -f backend    # バックエンド
+docker compose logs -f frontend   # nginx / フロントエンド
+```
+
+**4. 停止する**
+
+```bash
+make docker-down
+# または
+docker compose down
+```
+
+> データ（`incidents.db`、`.chromadb`）は Docker ボリューム `data` に保存されます。
+> `docker compose down -v` を実行するとボリュームごと削除されます（復旧不可）。
+
+**Syslog UDP ポートについて**
+
+デフォルトでは `1514/udp` を公開しています。
+実機や rsyslog から直接 `514/udp` で送信したい場合は `docker-compose.yml` の ports を変更してください:
+
+```yaml
+ports:
+  - "514:1514/udp"   # ホストの 514 → コンテナの 1514
+```
 
 ---
 

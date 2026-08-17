@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # .env が存在する場合のみ読み込む（AI キー等）
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Docker 環境用の固定値（.env の同名設定より優先）
+      API_HOST: "0.0.0.0"
+      API_PORT: "8080"
+      DATABASE_URL: "sqlite:////data/incidents.db"
+      AI_RAG_PATH: "/data/.chromadb"
+      TOPOLOGY_PATH: "configs/clos/yang_topology.yaml"
+      TOPOLOGY_SOURCE: "iida-yaml"
+      SYSLOG_IGNORE_FILE: "configs/clos/syslog_ignore.txt"
+    volumes:
+      - ./configs:/app/configs:ro  # トポロジー定義（読み取り専用）
+      - data:/data                  # incidents.db と .chromadb を永続化
+    ports:
+      - "1514:1514/udp"             # Syslog UDP（実機からは 514:1514/udp に変更）
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  data:
