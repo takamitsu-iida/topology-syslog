@@ -15,6 +15,7 @@ class IncidentOut(BaseModel):
     primary_event: str
     secondary_nodes: list[str]
     raw_log_count: int
+    raw_logs: list[str]
     status: str
 
 

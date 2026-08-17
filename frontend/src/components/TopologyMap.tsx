@@ -60,6 +60,14 @@ const STYLESHEET = [
       'curve-style': 'bezier' as const,
     },
   },
+  {
+    selector: 'edge[edge_type = "bgp"]',
+    style: {
+      'line-style': 'dashed' as const,
+      'line-color': '#7c3aed',
+      'target-arrow-color': '#7c3aed',
+    },
+  },
 ]
 
 export function TopologyMap({ elements, rootCauseNode, secondaryNodes }: Props) {

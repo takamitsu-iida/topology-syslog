@@ -28,6 +28,7 @@
 | Phase 3: 外部統合 | ✅ 完了 | 72 tests passed (累計) |
 | Phase 4: UI / ダッシュボード | ✅ 完了 | 80 tests passed (累計) |
 | Phase 5: 本番化 | ⏳ 未着手 | |
+| Phase 6: BGPピアリングのグラフエッジ化 | ⏳ 未着手 | 2026-08-16 計画策定 |
 
 ---
 
@@ -41,6 +42,7 @@
 | **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ✅ 完了 |
 | **Phase 4** | UI / ダッシュボード | インシデント可視化 | React + Cytoscape.js フロントエンド | ✅ 完了 |
 | **Phase 5** | 本番化 | 性能・セキュリティ・可用性 | 負荷テスト結果、本番 docker-compose | ⏳ 未着手 |
+| **Phase 6** | BGPピアリングのグラフエッジ化 | iBGP等でトポロジーと一致しないピアもインシデント集約対象にする | `yang_topology.yaml`, `yang_loader.py`, `graph_engine.py`, フロントエンド | ⏳ 未着手 |
 
 ---
 
@@ -529,3 +531,82 @@ ncclient>=0.6        # NETCONF同期 (Phase 3)
 pyyaml>=6.0
 syslogmp>=0.4        # Syslogパース補助 (or 独自実装)
 ```
+
+---
+
+## 2026-08-16 実施内容（バグ修正・機能追加）
+
+| # | 内容 | 対象ファイル |
+|---|---|---|
+| 1 | `SyslogMessage.raw_message` → `message` 属性名修正 | `ingestion/syslog_receiver.py` |
+| 2 | アプリケーションロガー未初期化でINFOログが出ない問題を修正 | `__main__.py` |
+| 3 | RFC 3164パーサーでhostnameがIPアドレスの場合、メッセージ本文の `<seq>: <hostname>:` からノード名を抽出するよう修正 | `ingestion/syslog_parser.py` |
+| 4 | `_consume_syslog()` が1メッセージずつ `infer()` を呼んでいたため、タイムウィンドウバッファを組み込みに修正（`WINDOW_SEC` 環境変数で制御） | `api/main.py`, `__main__.py` |
+| 5 | `Incident` モデルに `raw_logs: list[str]` を追加し、元SYSLOGをインシデント詳細画面で確認できるようにした | `models.py`, `root_cause_inferencer.py`, `incident_store.py`, `schemas.py`, `types.ts`, `IncidentDetail.tsx` |
+
+---
+
+## Phase 6: BGPピアリングのグラフエッジ化 ⏳ 未着手
+
+### 目的
+
+iBGPフルメッシュやRouteReflector構成など、物理的に隣接しないノード間のBGPピアリングをグラフエッジとして定義し、BGPセッション障害も根本原因推論の対象にする。
+
+### 背景
+
+現状の推論エンジンは `ancestor/descendant` 関係（物理エッジ由来）でのみ集約を行う。iBGP Leaf-Leaf のように物理エッジがないノード間でBGPセッションが切れた場合、それぞれが独立したインシデントとして生成されてしまう。
+
+### 実装タスク
+
+| # | タスク | 対象ファイル | 状態 |
+|---|---|---|---|
+| 6-1 | `yang_topology.yaml` に `routing-layer.bgp-session` セクションを追加 | `configs/clos/yang_topology.yaml` | ⏳ |
+| 6-2 | `yang_loader.py` でBGPセッションをエッジとして読み込む | `topology/yang_loader.py` | ⏳ |
+| 6-3 | `graph_engine.py` に `edges_with_data()` メソッドを追加 | `topology/graph_engine.py` | ⏳ |
+| 6-4 | フロントエンドのトポロジービューでBGPエッジを破線で表示 | `components/TopologyMap.tsx`, `api/routes/topology.py` | ⏳ |
+
+### YAMLスキーマ（設計）
+
+```yaml
+network-model:
+  physical-layer:
+    device: [...]
+    physical-connection: [...]
+  routing-layer:                    # ← 追加
+    bgp-session:
+      - session-id: "Leaf1-Leaf2-iBGP"
+        type: ibgp                  # ibgp | ebgp
+        endpoint:
+          - device-id: "Leaf1"
+          - device-id: "Leaf2"
+      - session-id: "Spine1-Leaf1-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine1"
+          - device-id: "Leaf1"
+```
+
+### エッジ方向の決定ルール
+
+| BGP種別 | 方向決定ルール |
+|---|---|
+| eBGP | role優先度（既存の物理エッジと同じ） |
+| iBGP（同一ロール） | `device-id` のアルファベット順で固定（循環グラフ回避） |
+
+### 集約後の動作イメージ
+
+```
+# BGPエッジ追加後: Leaf1 → Leaf2（iBGP, アルファベット順）
+
+logged_nodes = {Leaf1, Leaf2}  # iBGPセッション切断のみ
+Leaf1 の ancestors → {}        # 根本原因
+Leaf1 の descendants → {Leaf2} # BGPエッジ経由
+→ 1件のインシデント（Leaf1が根本原因、Leaf2が二次影響）
+```
+
+### 完了条件
+
+- [ ] `yang_topology.yaml` の `bgp-session` を読み込んでグラフエッジが追加される
+- [ ] iBGP Leaf-Leaf の両ノードからSYSLOGが来た場合に1件のインシデントに集約される
+- [ ] フロントエンドのトポロジービューでBGPエッジが破線表示される
+- [ ] 既存の物理エッジ由来の集約が壊れていないこと（既存テストがパスすること）

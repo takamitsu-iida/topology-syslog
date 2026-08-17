@@ -23,4 +23,5 @@ class Incident:
     primary_event: str
     secondary_nodes: list[str] = field(default_factory=list)
     raw_log_count: int = 0
+    raw_logs: list[str] = field(default_factory=list)
     status: str = "OPEN"      # "OPEN" | "RESOLVED"

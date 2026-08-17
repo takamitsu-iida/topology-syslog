@@ -38,11 +38,10 @@ class RootCauseInferencer:
         for rc in root_causes:
             descendants = graph.get_descendants(rc)
             secondary = sorted(logged_nodes.intersection(descendants))
+            related = {rc, *secondary}
+            related_msgs = [m for m in messages if m.hostname in related]
             primary_msg = next(
-                (m.message for m in messages if m.hostname == rc), "N/A"
-            )
-            raw_count = sum(
-                1 for m in messages if m.hostname in {rc, *secondary}
+                (m.message for m in related_msgs if m.hostname == rc), "N/A"
             )
             incidents.append(Incident(
                 incident_id=self._new_id(date_str),
@@ -50,7 +49,8 @@ class RootCauseInferencer:
                 root_cause_node=rc,
                 primary_event=primary_msg,
                 secondary_nodes=secondary,
-                raw_log_count=raw_count,
+                raw_log_count=len(related_msgs),
+                raw_logs=[m.message for m in related_msgs],
                 status="OPEN",
             ))
             assigned.add(rc)
@@ -58,16 +58,16 @@ class RootCauseInferencer:
 
         # 根本原因グループに属さない独立ノード
         for node in sorted(logged_nodes - assigned):
-            primary_msg = next(
-                (m.message for m in messages if m.hostname == node), "N/A"
-            )
+            node_msgs = [m for m in messages if m.hostname == node]
+            primary_msg = node_msgs[0].message if node_msgs else "N/A"
             incidents.append(Incident(
                 incident_id=self._new_id(date_str),
                 created_at=now,
                 root_cause_node=node,
                 primary_event=primary_msg,
                 secondary_nodes=[],
-                raw_log_count=sum(1 for m in messages if m.hostname == node),
+                raw_log_count=len(node_msgs),
+                raw_logs=[m.message for m in node_msgs],
                 status="OPEN",
             ))
 

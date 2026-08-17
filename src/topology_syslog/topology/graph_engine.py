@@ -33,3 +33,13 @@ class GraphEngine:
             {"id": n, "role": self._graph.nodes[n].get("role", "other")}
             for n in self._graph.nodes
         ]
+
+    def edges_with_data(self) -> list[dict]:
+        return [
+            {
+                "source": s,
+                "target": t,
+                "edge_type": d.get("edge_type", "physical"),
+            }
+            for s, t, d in self._graph.edges(data=True)
+        ]

@@ -131,3 +131,53 @@ network-model:
             interface-id: "GigabitEthernet0/2"
           - device-id: "Leaf3"
             interface-id: "GigabitEthernet0/1"
+
+  layer3-layer:
+    bgp-session:
+      # iBGP: Leaf full mesh (物理エッジなし → グラフに新規エッジを追加)
+      - session-id: "Leaf1-Leaf2-iBGP"
+        type: ibgp
+        endpoint:
+          - device-id: "Leaf1"
+          - device-id: "Leaf2"
+      - session-id: "Leaf1-Leaf3-iBGP"
+        type: ibgp
+        endpoint:
+          - device-id: "Leaf1"
+          - device-id: "Leaf3"
+      - session-id: "Leaf2-Leaf3-iBGP"
+        type: ibgp
+        endpoint:
+          - device-id: "Leaf2"
+          - device-id: "Leaf3"
+      # eBGP: Spine-Leaf (物理エッジと重複するためグラフ追加はスキップ)
+      - session-id: "Spine1-Leaf1-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine1"
+          - device-id: "Leaf1"
+      - session-id: "Spine1-Leaf2-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine1"
+          - device-id: "Leaf2"
+      - session-id: "Spine1-Leaf3-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine1"
+          - device-id: "Leaf3"
+      - session-id: "Spine2-Leaf1-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine2"
+          - device-id: "Leaf1"
+      - session-id: "Spine2-Leaf2-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine2"
+          - device-id: "Leaf2"
+      - session-id: "Spine2-Leaf3-eBGP"
+        type: ebgp
+        endpoint:
+          - device-id: "Spine2"
+          - device-id: "Leaf3"

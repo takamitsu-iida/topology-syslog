@@ -35,7 +35,8 @@ class TopologyLoader:
 
 
 def _build_graph(data: dict) -> nx.DiGraph:
-    physical = data["network-model"]["physical-layer"]
+    nm = data["network-model"]
+    physical = nm["physical-layer"]
     G: nx.DiGraph = nx.DiGraph()
 
     role_of: dict[str, int] = {}
@@ -53,10 +54,31 @@ def _build_graph(data: dict) -> nx.DiGraph:
         b: str = eps[1]["device-id"]
         if a not in G or b not in G:
             continue
-        # 優先度が低い (= より上流) 側から高い側へエッジを張る
         if role_of.get(a, 5) <= role_of.get(b, 5):
-            G.add_edge(a, b)
+            G.add_edge(a, b, edge_type="physical")
         else:
-            G.add_edge(b, a)
+            G.add_edge(b, a, edge_type="physical")
+
+    # BGP sessions — physical edges take precedence; only add new edges for BGP-only peers
+    l3 = nm.get("layer3-layer", {})
+    for session in l3.get("bgp-session", []):
+        eps = session.get("endpoint", [])
+        if len(eps) != 2:
+            continue
+        a = eps[0]["device-id"]
+        b = eps[1]["device-id"]
+        if a not in G or b not in G:
+            continue
+        bgp_type: str = session.get("type", "ebgp")
+        # iBGP: alphabetical order to avoid cycles between same-role peers
+        if bgp_type == "ibgp":
+            src, dst = sorted([a, b])
+        else:
+            if role_of.get(a, 5) <= role_of.get(b, 5):
+                src, dst = a, b
+            else:
+                src, dst = b, a
+        if not G.has_edge(src, dst):
+            G.add_edge(src, dst, edge_type="bgp", bgp_type=bgp_type)
 
     return G

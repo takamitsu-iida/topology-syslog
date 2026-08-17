@@ -96,6 +96,22 @@ export function IncidentDetail() {
           </div>
         </div>
       )}
+
+      {/* 元SYSLOGログ */}
+      {incident.raw_logs.length > 0 && (
+        <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm">
+          <h2 className="mb-3 text-base font-semibold text-gray-700">
+            元SYSLOGログ ({incident.raw_logs.length}件)
+          </h2>
+          <div className="max-h-64 overflow-y-auto rounded bg-gray-900 p-3">
+            {incident.raw_logs.map((log, i) => (
+              <p key={i} className="font-mono text-xs leading-5 text-green-400">
+                {log}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

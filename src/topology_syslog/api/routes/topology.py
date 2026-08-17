@@ -27,8 +27,8 @@ def get_topology_graph(request: Request) -> dict:
     graph = _graph(request)
     nodes = [{"data": d} for d in graph.nodes_with_data()]
     edges = [
-        {"data": {"id": f"{s}__{t}", "source": s, "target": t}}
-        for s, t in graph.edges
+        {"data": {"id": f"{e['source']}__{e['target']}", **e}}
+        for e in graph.edges_with_data()
     ]
     return {"elements": {"nodes": nodes, "edges": edges}}
 

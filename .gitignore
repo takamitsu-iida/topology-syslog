@@ -4,6 +4,9 @@
 # ログ
 logs/
 
+# make start/stop が使うPIDファイル
+.pids/
+
 # 仮想環境
 .venv/
 

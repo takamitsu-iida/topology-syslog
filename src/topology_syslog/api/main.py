@@ -66,7 +66,9 @@ def create_app(
         app.state.syslog_port = syslog_port
         transport = None
         try:
-            transport = await start_receiver(syslog_host, syslog_port, syslog_queue)
+            transport = await start_receiver(
+                syslog_host, syslog_port, syslog_queue, app.state.syslog_filter
+            )
             _logger.info("Syslog UDP receiver listening on %s:%s", syslog_host, syslog_port)
         except OSError as exc:
             _logger.warning("Syslog UDP receiver could not start: %s", exc)

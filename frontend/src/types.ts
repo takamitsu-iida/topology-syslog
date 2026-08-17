@@ -7,6 +7,7 @@ export interface Incident {
   primary_event: string
   secondary_nodes: string[]
   raw_log_count: number
+  raw_logs: string[]
   status: 'OPEN' | 'RESOLVED'
 }
 

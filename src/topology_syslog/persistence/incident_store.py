@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_engine, desc, select
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_engine, desc, select, text
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.pool import StaticPool
 
@@ -26,6 +26,7 @@ class _IncidentRow(_Base):
     primary_event   = Column(Text,     nullable=False)
     secondary_nodes = Column(JSON,     nullable=False)
     raw_log_count   = Column(Integer,  nullable=False)
+    raw_logs        = Column(JSON,     nullable=False, server_default="[]")
     status          = Column(String,   nullable=False)
 
 
@@ -46,6 +47,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         primary_event=inc.primary_event,
         secondary_nodes=inc.secondary_nodes,
         raw_log_count=inc.raw_log_count,
+        raw_logs=inc.raw_logs,
         status=inc.status,
     )
 
@@ -58,6 +60,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         primary_event=row.primary_event,
         secondary_nodes=list(row.secondary_nodes or []),
         raw_log_count=row.raw_log_count,
+        raw_logs=list(row.raw_logs or []),
         status=row.status,
     )
 
@@ -66,6 +69,16 @@ class IncidentStore:
     def __init__(self, database_url: str) -> None:
         self._engine = _make_engine(database_url)
         _Base.metadata.create_all(self._engine)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        # 既存DBへのカラム追加（冪等）
+        with self._engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE incidents ADD COLUMN raw_logs JSON"))
+                conn.commit()
+            except Exception:
+                pass
 
     def save(self, incident: Incident) -> None:
         with Session(self._engine) as session:
