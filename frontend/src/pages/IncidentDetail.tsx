@@ -36,6 +36,13 @@ export function IncidentDetail() {
 
   const isOpen = incident.status === 'OPEN'
 
+  const stateBadge = (() => {
+    if (incident.status === 'RESOLVED') return { label: '復旧済', cls: 'bg-gray-200 text-gray-600' }
+    if (incident.status === 'FLAPPING') return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
+    if (incident.recurrence_count > 0)  return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
+    return { label: '新規発生', cls: 'bg-red-100 text-red-700' }
+  })()
+
   return (
     <div className="mx-auto max-w-3xl p-4">
       <Link to="/incidents" className="text-sm text-blue-500 hover:underline">
@@ -44,12 +51,8 @@ export function IncidentDetail() {
 
       <div className="mt-2 flex items-center gap-3">
         <h1 className="text-2xl font-bold text-gray-800">{incident.incident_id}</h1>
-        <span
-          className={`rounded-full px-3 py-0.5 text-sm font-medium ${
-            isOpen ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600'
-          }`}
-        >
-          {incident.status}
+        <span className={`rounded-full px-3 py-0.5 text-sm font-medium ${stateBadge.cls}`}>
+          {stateBadge.label}
         </span>
       </div>
 

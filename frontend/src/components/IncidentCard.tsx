@@ -6,15 +6,32 @@ interface Props {
   onResolve?: (id: string) => void
 }
 
+type StateBadge = { label: string; cls: string }
+
+function getStateBadge(incident: Incident): StateBadge {
+  if (incident.status === 'RESOLVED')
+    return { label: '復旧済', cls: 'bg-gray-200 text-gray-600' }
+  if (incident.status === 'FLAPPING')
+    return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
+  if (incident.recurrence_count > 0)
+    return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
+  return { label: '新規発生', cls: 'bg-red-100 text-red-700' }
+}
+
 export function IncidentCard({ incident, onResolve }: Props) {
   const isOpen = incident.status === 'OPEN'
+  const state = getStateBadge(incident)
+
+  const cardCls = {
+    OPEN:     incident.recurrence_count > 0
+                ? 'border-orange-300 bg-orange-50'
+                : 'border-red-300 bg-red-50',
+    FLAPPING: 'border-amber-300 bg-amber-50',
+    RESOLVED: 'border-gray-200 bg-gray-50',
+  }[incident.status] ?? 'border-gray-200 bg-gray-50'
 
   return (
-    <div
-      className={`rounded-lg border p-4 shadow-sm transition-colors ${
-        isOpen ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'
-      }`}
-    >
+    <div className={`rounded-lg border p-4 shadow-sm transition-colors ${cardCls}`}>
       <div className="flex items-start justify-between gap-2">
         <Link
           to={`/incidents/${incident.incident_id}`}
@@ -22,12 +39,8 @@ export function IncidentCard({ incident, onResolve }: Props) {
         >
           {incident.incident_id}
         </Link>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-            isOpen ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600'
-          }`}
-        >
-          {incident.status}
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${state.cls}`}>
+          {state.label}
         </span>
       </div>
 

@@ -9,6 +9,16 @@ from topology_syslog.models import SyslogMessage
 # Cisco IOS 形式 (%FACILITY-SEV-MNEMONIC)
 _CISCO_RE = re.compile(r"%[A-Z0-9_]+-\d+-[A-Z0-9_]+")
 
+# 復旧イベントパターン: リンクアップ / BGP Up / OSPF FULL など
+_RECOVERY_RE = re.compile(
+    r'changed\s+state\s+to\s+up\b'       # LINK / LINEPROTO up
+    r'|ADJCHANGE[^\n]*\bUp\b'             # BGP neighbor Up
+    r'|ADJCHG[^\n]*\bto\s+FULL\b'        # OSPF neighbor FULL
+    r'|ADJCHANGE[^\n]*\bUP\b'             # ISIS / generic adjacency UP
+    r'|%SYS-\d+-RESTART',                 # システム再起動
+    re.IGNORECASE,
+)
+
 # Cisco "logging origin-id hostname" が付与するプレフィックス: "<seq>: <hostname>: "
 _CISCO_ORIGIN_RE = re.compile(r"^\d+:\s+(\S+?):\s+")
 
@@ -26,11 +36,13 @@ def parse(raw: bytes, source_ip: str) -> SyslogMessage:
     text = raw.decode("utf-8", errors="replace").strip()
     now = datetime.now(tz=timezone.utc)
 
-    return (
+    msg = (
         _try_rfc5424(text, source_ip, now)
         or _try_rfc3164(text, source_ip, now)
         or _fallback(text, source_ip, now)
     )
+    msg.is_recovery = bool(_RECOVERY_RE.search(msg.message))
+    return msg
 
 
 def _extract_pri(text: str) -> tuple[int, str] | None:

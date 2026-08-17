@@ -13,6 +13,7 @@ class SyslogMessage:
     severity: int  # 0=EMERGENCY … 7=DEBUG
     message: str
     event_type: str | None = None  # Cisco IOS "%FAC-SEV-MNEM" など
+    is_recovery: bool = False      # リンクアップ等の復旧イベント
 
 
 @dataclass
@@ -25,3 +26,4 @@ class Incident:
     raw_log_count: int = 0
     raw_logs: list[str] = field(default_factory=list)
     status: str = "OPEN"      # "OPEN" | "RESOLVED" | "FLAPPING"
+    recurrence_count: int = 0  # 同一根本原因の過去インシデント件数（保存直前に設定）

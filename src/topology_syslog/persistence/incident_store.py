@@ -20,14 +20,15 @@ class _Base(DeclarativeBase):
 class _IncidentRow(_Base):
     __tablename__ = "incidents"
 
-    incident_id     = Column(String,   primary_key=True)
-    created_at      = Column(DateTime, nullable=False)  # UTC tz-naive で保存
-    root_cause      = Column(String,   nullable=False)
-    primary_event   = Column(Text,     nullable=False)
-    secondary_nodes = Column(JSON,     nullable=False)
-    raw_log_count   = Column(Integer,  nullable=False)
-    raw_logs        = Column(JSON,     nullable=False, server_default="[]")
-    status          = Column(String,   nullable=False)
+    incident_id       = Column(String,   primary_key=True)
+    created_at        = Column(DateTime, nullable=False)  # UTC tz-naive で保存
+    root_cause        = Column(String,   nullable=False)
+    primary_event     = Column(Text,     nullable=False)
+    secondary_nodes   = Column(JSON,     nullable=False)
+    raw_log_count     = Column(Integer,  nullable=False)
+    raw_logs          = Column(JSON,     nullable=False, server_default="[]")
+    status            = Column(String,   nullable=False)
+    recurrence_count  = Column(Integer,  nullable=False, server_default="0")
 
 
 def _make_engine(database_url: str):
@@ -49,6 +50,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         raw_log_count=inc.raw_log_count,
         raw_logs=inc.raw_logs,
         status=inc.status,
+        recurrence_count=inc.recurrence_count,
     )
 
 
@@ -62,6 +64,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         raw_log_count=row.raw_log_count,
         raw_logs=list(row.raw_logs or []),
         status=row.status,
+        recurrence_count=int(row.recurrence_count or 0),
     )
 
 
@@ -74,11 +77,15 @@ class IncidentStore:
     def _migrate(self) -> None:
         # 既存DBへのカラム追加（冪等）
         with self._engine.connect() as conn:
-            try:
-                conn.execute(text("ALTER TABLE incidents ADD COLUMN raw_logs JSON"))
-                conn.commit()
-            except Exception:
-                pass
+            for ddl in [
+                "ALTER TABLE incidents ADD COLUMN raw_logs JSON",
+                "ALTER TABLE incidents ADD COLUMN recurrence_count INTEGER NOT NULL DEFAULT 0",
+            ]:
+                try:
+                    conn.execute(text(ddl))
+                    conn.commit()
+                except Exception:
+                    pass
 
     def save(self, incident: Incident) -> None:
         with Session(self._engine) as session:
@@ -116,9 +123,32 @@ class IncidentStore:
             session.commit()
             return True
 
+    def resolve_by_root_cause(self, root_cause_node: str) -> list[str]:
+        """指定根本原因ノードのOPEN/FLAPPINGインシデントをRESOLVEDにして、そのIDリストを返す。"""
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.root_cause == root_cause_node)
+                .where(_IncidentRow.status.in_(["OPEN", "FLAPPING"]))
+            ).all()
+            ids = [r.incident_id for r in rows]
+            for row in rows:
+                row.status = "RESOLVED"
+            session.commit()
+            return ids
+
     def count(self) -> int:
         with Session(self._engine) as session:
             return session.query(_IncidentRow).count()
+
+    def count_by_root_cause(self, root_cause_node: str) -> int:
+        """指定根本原因ノードの既存インシデント件数を返す（再発判定に使用）。"""
+        with Session(self._engine) as session:
+            return (
+                session.query(_IncidentRow)
+                .filter(_IncidentRow.root_cause == root_cause_node)
+                .count()
+            )
 
     def find_similar_by_root_cause(self, incident: Incident, n: int = 5) -> list[Incident]:
         """同じ根本原因ノードの過去インシデントを返す（自身は除外）。"""

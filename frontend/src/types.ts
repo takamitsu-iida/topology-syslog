@@ -9,6 +9,7 @@ export interface Incident {
   raw_log_count: number
   raw_logs: string[]
   status: 'OPEN' | 'RESOLVED' | 'FLAPPING'
+  recurrence_count: number
 }
 
 export interface AiReport {

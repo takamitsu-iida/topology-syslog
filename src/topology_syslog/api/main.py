@@ -130,17 +130,47 @@ def create_app(
                     _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
                     return
                 try:
-                    incidents = app.state.inferencer.infer(msgs, graph)
+                    # 復旧メッセージ（リンクアップ等）は推論に使わず、既存インシデントの自動解決に使う
+                    non_recovery = [m for m in msgs if not m.is_recovery]
+                    recovery_nodes = {
+                        m.hostname for m in msgs
+                        if m.is_recovery and graph.node_exists(m.hostname)
+                    }
+
+                    incidents = app.state.inferencer.infer(non_recovery, graph)
                     _logger.info(
-                        "Inferred %d incident(s) from %d syslog(s)",
-                        len(incidents), len(msgs),
+                        "Inferred %d incident(s) from %d syslog(s) (%d recovery event(s))",
+                        len(incidents), len(non_recovery), len(msgs) - len(non_recovery),
                     )
                     for inc in incidents:
+                        # 保存前に過去の同根本原因インシデント数を記録（再発判定）
+                        inc.recurrence_count = await asyncio.to_thread(
+                            app.state.store.count_by_root_cause, inc.root_cause_node
+                        )
                         await asyncio.to_thread(app.state.store.save, inc)
                         await app.state.ws_manager.broadcast({
                             "type": "incident.new",
                             "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
                         })
+
+                    # 復旧ノードに対応するOPEN/FLAPPINGインシデントを自動RESOLVED
+                    for node in recovery_nodes:
+                        resolved_ids = await asyncio.to_thread(
+                            app.state.store.resolve_by_root_cause, node
+                        )
+                        for rid in resolved_ids:
+                            resolved_inc = await asyncio.to_thread(
+                                app.state.store.get_by_id, rid
+                            )
+                            if resolved_inc:
+                                _logger.info(
+                                    "Auto-resolved %s (root_cause=%s sent recovery event)", rid, node
+                                )
+                                await app.state.ws_manager.broadcast({
+                                    "type": "incident.resolved",
+                                    "incident_id": rid,
+                                    "incident": IncidentOut.model_validate(resolved_inc).model_dump(mode="json"),
+                                })
                 except Exception:
                     _logger.exception("Error processing syslog messages")
 

@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { Incident } from '../types'
 
-interface WsEvent {
-  type: 'incident.new'
-  incident: Incident
-}
+type WsEvent =
+  | { type: 'incident.new'; incident: Incident }
+  | { type: 'incident.resolved'; incident_id: string; incident: Incident }
 
 /**
- * /ws/incidents へ接続し、新規インシデント発生時にコールバックを呼ぶ。
+ * /ws/incidents へ接続し、新規インシデント発生・自動復旧時にコールバックを呼ぶ。
  * コンポーネントのアンマウント時に自動切断する。
  */
 export function useIncidentWebSocket(onNewIncident: (inc: Incident) => void): void {
@@ -24,7 +23,8 @@ export function useIncidentWebSocket(onNewIncident: (inc: Incident) => void): vo
     ws.onmessage = (event: MessageEvent<string>) => {
       try {
         const data = JSON.parse(event.data) as WsEvent
-        if (data.type === 'incident.new') {
+        // 新規発生・自動復旧どちらもコールバックを呼ぶ（一覧再取得のトリガー）
+        if (data.type === 'incident.new' || data.type === 'incident.resolved') {
           cbRef.current(data.incident)
         }
       } catch {
