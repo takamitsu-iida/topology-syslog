@@ -22,9 +22,6 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
-netconf = [
-    "ncclient>=0.6",
-]
 
 [project.scripts]
 topology-syslog = "topology_syslog.__main__:main"

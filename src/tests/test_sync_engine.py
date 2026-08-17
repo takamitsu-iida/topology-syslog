@@ -9,7 +9,6 @@ from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.sync_engine import (
     TopologySyncEngine,
     _graph_changed,
-    _xml_to_iida_dict,
 )
 
 
@@ -147,39 +146,3 @@ def test_fetch_from_restconf_builds_graph():
     call_url = mock_get.call_args.args[0]
     assert "restconf/data" in call_url
     assert "Bearer token123" in mock_get.call_args.kwargs["headers"]["Authorization"]
-
-
-# ---- _xml_to_iida_dict --------------------------------------------
-
-def test_xml_to_iida_dict_parses_devices_and_connections():
-    NS = "urn:ietf:params:xml:ns:yang:iida-network-model"
-    xml_str = f"""<data>
-  <physical-layer xmlns="{NS}">
-    <device>
-      <device-id>R1</device-id>
-      <role>core</role>
-    </device>
-    <device>
-      <device-id>SW1</device-id>
-      <role>access</role>
-    </device>
-    <physical-connection>
-      <endpoint><device-id>R1</device-id></endpoint>
-      <endpoint><device-id>SW1</device-id></endpoint>
-    </physical-connection>
-  </physical-layer>
-</data>"""
-    data = _xml_to_iida_dict(xml_str)
-    physical = data["network-model"]["physical-layer"]
-    assert len(physical["device"]) == 2
-    assert physical["device"][0]["device-id"] == "R1"
-    assert physical["device"][0]["role"] == "core"
-    assert len(physical["physical-connection"]) == 1
-    assert physical["physical-connection"][0]["endpoint"][0]["device-id"] == "R1"
-
-
-def test_xml_to_iida_dict_missing_physical_layer_returns_empty():
-    data = _xml_to_iida_dict("<data/>")
-    physical = data["network-model"]["physical-layer"]
-    assert physical["device"] == []
-    assert physical["physical-connection"] == []

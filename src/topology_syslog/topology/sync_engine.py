@@ -1,25 +1,17 @@
 """トポロジー自動同期エンジン。
 
-バックグラウンドスレッドで RESTCONF / NETCONF からトポロジーを定期取得し、
+バックグラウンドスレッドで RESTCONF からトポロジーを定期取得し、
 変化を検知したときだけ GraphEngine を更新する。
 """
 from __future__ import annotations
 
 import threading
-import xml.etree.ElementTree as ET
 from typing import Callable
 
 import networkx as nx
 
 from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader
-
-# NETCONF フィルター: iida-network-model の physical-layer を対象にする
-_NETCONF_FILTER = """<filter>
-  <network-model xmlns="urn:ietf:params:xml:ns:yang:iida-network-model"/>
-</filter>"""
-
-_YANG_NS = "urn:ietf:params:xml:ns:yang:iida-network-model"
 
 
 class TopologySyncEngine:
@@ -96,37 +88,6 @@ class TopologySyncEngine:
         resp.raise_for_status()
         return self._loader.load_from_dict(resp.json())
 
-    def fetch_from_netconf(
-        self,
-        host: str,
-        port: int,
-        user: str,
-        password: str,
-        *,
-        hostkey_verify: bool = False,
-    ) -> nx.DiGraph:
-        """NETCONF (ncclient) 経由でトポロジーを取得して DiGraph を返す。
-
-        ncclient が未インストールの場合は ImportError を送出する。
-        """
-        try:
-            from ncclient import manager  # type: ignore[import]
-        except ImportError as exc:
-            raise ImportError(
-                "ncclient が必要です: pip install 'topology-syslog[netconf]'"
-            ) from exc
-
-        with manager.connect(
-            host=host,
-            port=port,
-            username=user,
-            password=password,
-            hostkey_verify=hostkey_verify,
-        ) as conn:
-            reply = conn.get(filter=_NETCONF_FILTER)
-            data = _xml_to_iida_dict(reply.data_xml)
-            return self._loader.load_from_dict(data)
-
 
 # ------------------------------------------------------------------
 # モジュールレベルヘルパー (テスト可能にするため公開)
@@ -135,38 +96,3 @@ class TopologySyncEngine:
 def _graph_changed(engine: GraphEngine, new_graph: nx.DiGraph) -> bool:
     """現在のグラフと新グラフのエッジセットを比較する。"""
     return frozenset(engine.edges) != frozenset(new_graph.edges())
-
-
-def _xml_to_iida_dict(xml_str: str) -> dict:
-    """NETCONF の data_xml を iida-network-model dict に変換する。"""
-    root = ET.fromstring(xml_str)
-    physical = root.find(f".//{{{_YANG_NS}}}physical-layer")
-    if physical is None:
-        return {"network-model": {"physical-layer": {"device": [], "physical-connection": []}}}
-
-    devices = [
-        {
-            "device-id": dev.findtext(f"{{{_YANG_NS}}}device-id", ""),
-            "role":      dev.findtext(f"{{{_YANG_NS}}}role",      "other"),
-        }
-        for dev in physical.findall(f"{{{_YANG_NS}}}device")
-    ]
-
-    connections = [
-        {
-            "endpoint": [
-                {"device-id": ep.findtext(f"{{{_YANG_NS}}}device-id", "")}
-                for ep in conn.findall(f"{{{_YANG_NS}}}endpoint")
-            ]
-        }
-        for conn in physical.findall(f"{{{_YANG_NS}}}physical-connection")
-    ]
-
-    return {
-        "network-model": {
-            "physical-layer": {
-                "device": devices,
-                "physical-connection": connections,
-            }
-        }
-    }

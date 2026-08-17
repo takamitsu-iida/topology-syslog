@@ -731,7 +731,6 @@ links:
     i2: "i0"
     label: "Ubuntu-Bridge1"
 
-  # ────────────────────────────────────────────────────────────
 annotations:
   - border_color: '#00000000'
     border_style: ''
