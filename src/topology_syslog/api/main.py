@@ -153,6 +153,7 @@ def create_app(
 
         # AI コンポーネント（オプション）— chromadb / openai が未インストールでも起動可能
         app.state.report_generator = None
+        app.state.rag_store = None
         if ai_enabled:
             from topology_syslog.ai.llm_client import create_llm_client
             from topology_syslog.ai.query_cache import QueryCache
@@ -162,6 +163,7 @@ def create_app(
             llm   = create_llm_client()
             cache = QueryCache(database_url, ttl_days=ai_cache_ttl_days)
             rag   = RAGStore(ai_rag_path)
+            app.state.rag_store = rag
             app.state.report_generator = ReportGenerator(llm, cache, rag)
             _logger.info("AI report generator ready (rag_path=%s)", ai_rag_path)
 

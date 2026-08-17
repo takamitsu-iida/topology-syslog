@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { generateAiReport, getIncident, getTopologyGraph } from '../api/client'
+import { generateAiReport, getIncident, getSimilarIncidents, getTopologyGraph } from '../api/client'
 import { TopologyMap } from '../components/TopologyMap'
 
 export function IncidentDetail() {
@@ -17,6 +17,12 @@ export function IncidentDetail() {
     queryKey: ['topology-graph'],
     queryFn: getTopologyGraph,
     staleTime: 60_000,
+  })
+
+  const { data: similarData } = useQuery({
+    queryKey: ['similar-incidents', id],
+    queryFn: () => getSimilarIncidents(id!),
+    enabled: !!id,
   })
 
   const [aiReport, setAiReport] = useState<string | null>(null)
@@ -168,6 +174,52 @@ export function IncidentDetail() {
           )
         )}
       </div>
+
+      {/* 類似インシデント */}
+      {similarData && (
+        <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-base font-semibold text-gray-700">類似インシデント</h2>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+              {similarData.source === 'rag' ? 'AI 類似検索' : '同一根本原因'}
+            </span>
+          </div>
+          {similarData.incidents.length === 0 ? (
+            <p className="text-sm text-gray-400">該当なし</p>
+          ) : (
+            <ul className="space-y-2">
+              {similarData.incidents.map((s) => (
+                <li key={s.incident_id}>
+                  <Link
+                    to={`/incidents/${encodeURIComponent(s.incident_id)}`}
+                    className="flex items-start gap-3 rounded-lg border p-3 hover:bg-gray-50 transition-colors"
+                  >
+                    <span
+                      className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        s.status === 'OPEN'
+                          ? 'bg-red-100 text-red-700'
+                          : s.status === 'FLAPPING'
+                          ? 'bg-orange-100 text-orange-700'
+                          : 'bg-gray-200 text-gray-600'
+                      }`}
+                    >
+                      {s.status}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800">{s.incident_id}</p>
+                      <p className="text-xs text-gray-500">
+                        根本原因: {s.root_cause_node} &nbsp;·&nbsp;
+                        {new Date(s.created_at).toLocaleString('ja-JP')}
+                      </p>
+                      <code className="mt-0.5 block truncate text-xs text-gray-600">{s.primary_event}</code>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }

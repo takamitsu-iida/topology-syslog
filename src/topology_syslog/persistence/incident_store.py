@@ -119,3 +119,26 @@ class IncidentStore:
     def count(self) -> int:
         with Session(self._engine) as session:
             return session.query(_IncidentRow).count()
+
+    def find_similar_by_root_cause(self, incident: Incident, n: int = 5) -> list[Incident]:
+        """同じ根本原因ノードの過去インシデントを返す（自身は除外）。"""
+        with Session(self._engine) as session:
+            stmt = (
+                select(_IncidentRow)
+                .where(_IncidentRow.root_cause == incident.root_cause_node)
+                .where(_IncidentRow.incident_id != incident.incident_id)
+                .order_by(desc(_IncidentRow.created_at))
+                .limit(n)
+            )
+            return [_from_row(r) for r in session.scalars(stmt).all()]
+
+    def get_by_ids(self, ids: list[str]) -> list[Incident]:
+        """複数 ID を一括取得。存在しない ID はスキップ。"""
+        if not ids:
+            return []
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow).where(_IncidentRow.incident_id.in_(ids))
+            ).all()
+            by_id = {r.incident_id: _from_row(r) for r in rows}
+            return [by_id[i] for i in ids if i in by_id]

@@ -16,6 +16,19 @@ export interface AiReport {
   report: string
 }
 
+export interface SimilarIncident {
+  incident_id: string
+  root_cause_node: string
+  created_at: string
+  primary_event: string
+  status: 'OPEN' | 'RESOLVED' | 'FLAPPING'
+}
+
+export interface SimilarIncidentsResponse {
+  incidents: SimilarIncident[]
+  source: 'rag' | 'db'
+}
+
 export interface IncidentListResponse {
   incidents: Incident[]
   total: number
