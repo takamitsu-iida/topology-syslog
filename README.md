@@ -23,6 +23,7 @@
 | 機能 | 説明 |
 |---|---|
 | SYSLOG 受信 | UDP (RFC 3164 / RFC 5424) 受信、`/ingest` API 経由での取り込み |
+| **ファイル取り込み** | rsyslog が書き出したログファイルや `tail -f` パイプからインシデントへ変換 |
 | **根本原因推論** | トポロジーグラフを用いた自動インシデント集約（後述） |
 | BGP ピアリング対応 | iBGP など物理接続のない論理セッションもグラフエッジとして扱う |
 | リアルタイム通知 | WebSocket でブラウザに即時プッシュ |
@@ -445,6 +446,83 @@ LLM へプロンプト送信（インシデント概要 + 類似事例）
 同じ種別の障害が再発した場合、LLM への問い合わせをスキップして即返却します。
 
 **RAG（蓄積型学習）**: 生成したレポートは ChromaDB に蓄積され、次回の類似インシデント分析時の参考情報として使われます。インシデントが蓄積されるほど、レポートの精度が向上します。
+
+---
+
+## SYSLOG ファイル取り込みモード
+
+APIサーバーを起動せずに、rsyslog が書き出したログファイルや `tail -f` パイプから直接インシデントへ変換できます。
+
+### ファイルを一括処理する
+
+```bash
+topology-syslog -i network-syslog.txt -t configs/clos/yang_topology.yaml
+```
+
+ログのタイムスタンプをもとに `WINDOW_SEC`（デフォルト 30 秒）ごとのウィンドウへ自動グループ化し、根本原因推論を実行します。
+
+### パイプ（ストリーミング）で受け取る
+
+```bash
+tail -f /var/log/network-syslog.txt | topology-syslog -i
+```
+
+`tail -f` から流れてくる行を逐次パースし、`WINDOW_SEC` 秒間新規行が来なければバッファをフラッシュして推論します。EOF でも残バッファを処理します。
+
+### オプション
+
+| オプション | 説明 |
+|---|---|
+| `-i [FILE]` | ファイル指定（省略時は標準入力） |
+| `-t FILE` / `TOPOLOGY_PATH` | トポロジー定義ファイル（**必須**） |
+| `--json` | インシデントを JSON Lines 形式で出力 |
+| `TOPOLOGY_SOURCE` | トポロジー形式（`iida-yaml` / `ietf-json`） |
+| `WINDOW_SEC` | タイムウィンドウ秒数（デフォルト `30`） |
+| `DATABASE_URL` | 指定するとインシデントを DB にも保存 |
+| `SYSLOG_IGNORE_FILE` | 無視パターンファイル |
+
+### 出力例
+
+```
+[INCIDENT] INC-20260817-001
+  Root Cause  : Spine1
+  Event       : (inferred — node did not send SYSLOG)
+  Secondary   : Leaf1, Leaf2, Leaf3
+  Logs        : 4
+  Status      : OPEN
+
+1 incident(s) found.
+```
+
+`--json` を指定すると JSON Lines 形式で出力されます（ログ分析ツールへのパイプに便利です）:
+
+```bash
+tail -f /var/log/network-syslog.txt | topology-syslog -i --json | jq .
+```
+
+```json
+{"incident_id": "INC-20260817-001", "root_cause_node": "Spine1", "secondary_nodes": ["Leaf1", "Leaf2", "Leaf3"], "raw_log_count": 4, "status": "OPEN", ...}
+```
+
+### rsyslog との連携例
+
+rsyslog でネットワーク機器のログをファイルに記録している場合:
+
+```bash
+# /etc/rsyslog.d/10-network.conf
+:fromhost-ip, startswith, "10." /var/log/network-syslog.txt
+```
+
+その後、以下のように取り込みます:
+
+```bash
+# 既存ファイルを一括処理（過去ログの分析）
+export TOPOLOGY_PATH=/etc/topology-syslog/yang_topology.yaml
+topology-syslog -i /var/log/network-syslog.txt
+
+# リアルタイムで監視
+tail -f /var/log/network-syslog.txt | topology-syslog -i
+```
 
 ---
 
