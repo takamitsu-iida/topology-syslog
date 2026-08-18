@@ -524,6 +524,32 @@ topology-syslog -i /var/log/network-syslog.txt
 tail -f /var/log/network-syslog.txt | topology-syslog -i
 ```
 
+#### Mac で rsyslog がすでに 514/udp を使用している場合
+
+Mac の rsyslog が `514/udp` を占有している場合は、topology-syslog をデフォルトの `1514/udp` のまま起動し、rsyslog に転送ルールを追加することで共存できます。
+
+```
+ネットワーク機器 → rsyslog (:514) → ファイル保存 + topology-syslog (:1514) へ転送
+```
+
+`/opt/homebrew/etc/rsyslog.conf` に転送ルールを追加します:
+
+```conf
+# ネットワーク機器 (10.x.x.x) のログをファイルに保存
+:fromhost-ip, startswith, "10." /var/log/network-syslog.txt
+
+# 同じログを topology-syslog（1514/udp）にも転送（@ = UDP、@@ = TCP）
+:fromhost-ip, startswith, "10." @127.0.0.1:1514
+```
+
+`docker-compose.yml` はデフォルトの `1514:1514/udp` のまま変更不要です。
+
+ポート競合を完全に避けたい場合は、`tail -f` によるファイル取り込みモードも利用できます:
+
+```bash
+tail -f /var/log/network-syslog.txt | topology-syslog -i
+```
+
 ---
 
 ## テスト
