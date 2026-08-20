@@ -172,6 +172,8 @@ def main() -> None:
         ai_enabled=os.getenv("AI_ENABLED", "false").lower() == "true",
         ai_rag_path=os.getenv("AI_RAG_PATH", ".chromadb"),
         ai_cache_ttl_days=int(os.getenv("AI_CACHE_TTL_DAYS", "7")),
+        vigil_url=os.getenv("VIGIL_URL") or None,
+        vigil_team_name=os.getenv("VIGIL_TEAM", "default"),
     )
 
     uvicorn.run(

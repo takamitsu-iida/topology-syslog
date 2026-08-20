@@ -275,6 +275,8 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `OPENAI_API_KEY` | — | OpenAI API キー（`AI_ENABLED=true` の場合必要） |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama のベース URL |
 | `OLLAMA_MODEL` | `llama3` | Ollama のモデル名 |
+| `VIGIL_URL` | — | vigil の URL（設定するとインシデントを転送） |
+| `VIGIL_TEAM` | `default` | vigil のチーム名 |
 
 ---
 
@@ -447,6 +449,100 @@ LLM へプロンプト送信（インシデント概要 + 類似事例）
 
 **RAG（蓄積型学習）**: 生成したレポートは ChromaDB に蓄積され、次回の類似インシデント分析時の参考情報として使われます。インシデントが蓄積されるほど、レポートの精度が向上します。
 
+**vigil AI エージェントとの役割分担**:
+
+vigil と連携している場合、両 AI エージェントは以下のように役割を分担します。
+
+| AI エージェント | 役割 | レポートの内容 | 読者 |
+|---|---|---|---|
+| **topology-syslog** | 「何が起きたか」 | 根本原因・影響ノード・生ログ解析・再発パターン・予防策 | ネットワークエンジニア |
+| **vigil** | 「何をすべきか」 | 対応チェックリスト・確認コマンド・エスカレーション判断・顧客連絡文面 | オンコール担当者 |
+
+vigil の `POST /api/v1/incidents/{id}/investigate` が呼び出された際、vigil は本エンドポイント（`POST /incidents/{id}/report`）を呼び出してレポートを取得し、それを技術的背景として行動指示レポートを生成します。topology-syslog 側の AI が無効の場合は、vigil が単独で汎用レポートを生成します。
+
+
+<br><br>
+
+---
+
+<br><br>
+
+## vigil 連携
+
+[vigil](https://github.com/your-org/vigil) はインシデント管理・エスカレーション通知プラットフォームです。
+
+topology-syslog が生成したインシデントを vigil に転送することで、オンコール担当者への通知・エスカレーション・クローズ管理を vigil 側で一元管理できます。
+
+### 動作の流れ
+
+```
+ネットワーク機器
+     │  SYSLOG (UDP)
+     ▼
+topology-syslog
+  ├─ 根本原因推論 → インシデント生成
+  ├─ DB 保存 / WebSocket 配信
+  └─ POST /api/v1/alerts  ──► vigil
+                                  ├─ 重複排除（fingerprint）
+                                  ├─ オンコール担当者へ通知
+                                  └─ エスカレーションポリシー適用
+```
+
+### 設定
+
+`.env` に以下を追加するだけで有効になります。
+
+```bash
+VIGIL_URL=http://vigil:8000   # vigil サーバーの URL
+VIGIL_TEAM=network            # 通知先チーム（vigil のスケジュールと対応）
+```
+
+`VIGIL_URL` が未設定の場合、vigil 転送は無効です（他の機能には影響しません）。
+
+### 優先度マッピング
+
+topology-syslog のインシデントは vigil の優先度（P1〜P4）に以下のルールで変換されます。
+
+| 条件 | vigil 優先度 |
+|---|---|
+| ステータスが `FLAPPING` | `P2` |
+| 同一根本原因ノードで過去に発生あり（`recurrence_count > 0`） | `P2` |
+| それ以外 | `P3`（デフォルト） |
+
+### vigil 側の重複排除
+
+vigil は `source`（根本原因ノード名）と `title` から fingerprint を計算し、同一インシデントの重複登録を防ぎます。
+topology-syslog の同一インシデントが複数回転送されても、vigil 側では 1 件として扱われます。
+
+### インシデントのライフサイクル
+
+topology-syslog と vigil はそれぞれ独立してインシデントを管理しますが、以下のタイミングで双方向に同期します。
+
+| 操作 | topology-syslog | vigil |
+|---|---|---|
+| 障害 SYSLOG 受信 | `OPEN` インシデントを生成 | `POST /api/v1/alerts` を受信して triggered |
+| 復旧 SYSLOG 受信 | 自動 `RESOLVED` → **vigil も自動 resolve**（連動） | resolved |
+| topology-syslog で手動 resolve | `RESOLVED` | **同 source の vigil インシデントも resolve**（連動） |
+| vigil で手動 Resolve | **topology-syslog インシデントも resolve**（連動） | resolved |
+
+### Docker Compose での構成例
+
+```yaml
+services:
+  topology-syslog:
+    build: .
+    environment:
+      - VIGIL_URL=http://vigil:8000
+      - VIGIL_TEAM=network
+    depends_on:
+      - vigil
+
+  vigil:
+    image: vigil:latest
+    ports:
+      - "8000:8000"
+```
+
 ---
 
 ## SYSLOG ファイル取り込みモード
@@ -548,6 +644,49 @@ Mac の rsyslog が `514/udp` を占有している場合は、topology-syslog �
 
 ```bash
 tail -f /var/log/network-syslog.txt | topology-syslog -i
+```
+
+<br><br>
+
+---
+
+<br><br>
+
+## 長期稼働に関する注意事項
+
+### Docker ログローテーション
+
+`docker-compose.yml` に `json-file` ドライバの `max-size` / `max-file` を設定しています。
+
+| コンテナ | 最大サイズ | 保持ファイル数 | 最大合計 |
+|---|---|---|---|
+| backend | 20 MB | 5 | 100 MB |
+| frontend | 10 MB | 3 | 30 MB |
+
+### インシデントの自動アーカイブ
+
+`RESOLVED` かつ作成から **90 日以上**経過したインシデントは、サーバー起動から 24 時間後に初回削除され、以後 24 時間ごとに自動実行されます。
+`OPEN` / `FLAPPING` のインシデントは削除されません。
+
+### SYSLOG ログの保存上限
+
+1 件のインシデントに対して DB に保存する生ログは最大 **200 件**までです。
+200 件を超えた分は削捨されますが、`raw_log_count` には実際の受信件数が正確に記録されます。
+
+### AI クエリキャッシュの自動クリーンアップ
+
+AI レポートの結果をキャッシュする `ai_cache` テーブルは、TTL (`AI_CACHE_TTL_DAYS`、デフォルト 7 日) 切れの行を 24 時間ごとに自動削除します。
+
+### RAG ストア（ChromaDB）
+
+ChromaDB は自動プルーニングされません。Docker 環境ではボリューム `data` 内の `/data/.chromadb` に保存されます。
+ディスク使用量が問題になる場合は、コンテナを停止して手動で削除してください。
+
+```bash
+# Docker 環境で ChromaDB をリセットする場合
+docker compose down
+rm -rf data/.chromadb
+docker compose up -d
 ```
 
 ---

@@ -80,3 +80,7 @@ class ReportGenerator:
         self._rag.add(incident)
 
         return report
+
+    def purge_cache(self) -> int:
+        """TTL 切れのキャッシュ行を削除して削除件数を返す。"""
+        return self._cache.purge_expired()

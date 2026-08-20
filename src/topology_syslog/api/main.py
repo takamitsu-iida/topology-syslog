@@ -56,11 +56,18 @@ def create_app(
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,
+    vigil_url: str | None = None,
+    vigil_team_name: str = "default",
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
         app.state.ws_manager = ConnectionManager()
+        if vigil_url:
+            from topology_syslog.notification.vigil import VigilNotifier
+            app.state.vigil_notifier = VigilNotifier(vigil_url, team_name=vigil_team_name)
+        else:
+            app.state.vigil_notifier = None
         app.state.inferencer = RootCauseInferencer(
             severity_threshold=inference_severity_threshold,
             flapping_threshold=flapping_threshold,
@@ -148,6 +155,11 @@ def create_app(
                             app.state.store.count_by_root_cause, inc.root_cause_node
                         )
                         await asyncio.to_thread(app.state.store.save, inc)
+                        if app.state.vigil_notifier is not None:
+                            try:
+                                await asyncio.to_thread(app.state.vigil_notifier.send, inc)
+                            except Exception:
+                                _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
                         await app.state.ws_manager.broadcast({
                             "type": "incident.new",
                             "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
@@ -171,6 +183,11 @@ def create_app(
                                     "incident_id": rid,
                                     "incident": IncidentOut.model_validate(resolved_inc).model_dump(mode="json"),
                                 })
+                        if resolved_ids and app.state.vigil_notifier is not None:
+                            try:
+                                await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, node)
+                            except Exception:
+                                _logger.warning("Failed to resolve vigil incidents for node %s", node)
                 except Exception:
                     _logger.exception("Error processing syslog messages")
 
@@ -197,9 +214,25 @@ def create_app(
             app.state.report_generator = ReportGenerator(llm, cache, rag)
             _logger.info("AI report generator ready (rag_path=%s)", ai_rag_path)
 
+        async def _run_cleanup() -> None:
+            while True:
+                await asyncio.sleep(24 * 3600)
+                try:
+                    purged = await asyncio.to_thread(app.state.store.purge_old_resolved, 90)
+                    if purged:
+                        _logger.info("Cleanup: purged %d old RESOLVED incidents (>90 days)", purged)
+                    if app.state.report_generator is not None:
+                        purged_c = await asyncio.to_thread(app.state.report_generator.purge_cache)
+                        if purged_c:
+                            _logger.info("Cleanup: purged %d expired AI cache entries", purged_c)
+                except Exception:
+                    _logger.exception("Cleanup task error")
+
         consumer = asyncio.create_task(_consume_syslog())
+        cleanup = asyncio.create_task(_run_cleanup())
         yield
         consumer.cancel()
+        cleanup.cancel()
         if transport:
             transport.close()
 

@@ -10,7 +10,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Column, DateTime, String, Text, create_engine
+from sqlalchemy import Column, DateTime, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.pool import StaticPool
 
@@ -75,3 +75,14 @@ class QueryCache:
                 created_at=datetime.now(tz=timezone.utc).replace(tzinfo=None),
             ))
             session.commit()
+
+    def purge_expired(self) -> int:
+        """TTL 切れのキャッシュ行を削除して削除件数を返す。"""
+        cutoff = (datetime.now(tz=timezone.utc) - self._ttl).replace(tzinfo=None)
+        with Session(self._engine) as session:
+            rows = session.scalars(select(_CacheRow).where(_CacheRow.created_at < cutoff)).all()
+            count = len(rows)
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return count

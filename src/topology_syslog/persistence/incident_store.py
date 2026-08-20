@@ -12,6 +12,8 @@ from sqlalchemy.pool import StaticPool
 
 from topology_syslog.models import Incident
 
+_RAW_LOGS_CAP = 200  # DB に保存するログ最大件数
+
 
 class _Base(DeclarativeBase):
     pass
@@ -48,7 +50,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         primary_event=inc.primary_event,
         secondary_nodes=inc.secondary_nodes,
         raw_log_count=inc.raw_log_count,
-        raw_logs=inc.raw_logs,
+        raw_logs=inc.raw_logs[:_RAW_LOGS_CAP],
         status=inc.status,
         recurrence_count=inc.recurrence_count,
     )
@@ -172,3 +174,19 @@ class IncidentStore:
             ).all()
             by_id = {r.incident_id: _from_row(r) for r in rows}
             return [by_id[i] for i in ids if i in by_id]
+
+    def purge_old_resolved(self, days: int = 90) -> int:
+        """RESOLVED かつ days 日以上前のインシデントを削除して削除件数を返す。"""
+        from datetime import timedelta
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.status == "RESOLVED")
+                .where(_IncidentRow.created_at < cutoff)
+            ).all()
+            count = len(rows)
+            for row in rows:
+                session.delete(row)
+            session.commit()
+        return count
