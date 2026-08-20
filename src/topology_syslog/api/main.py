@@ -183,7 +183,8 @@ def create_app(
                                     "incident_id": rid,
                                     "incident": IncidentOut.model_validate(resolved_inc).model_dump(mode="json"),
                                 })
-                        if resolved_ids and app.state.vigil_notifier is not None:
+                        # ローカルストアの状態に関わらず復旧イベントが来たら常に通知する
+                        if app.state.vigil_notifier is not None:
                             try:
                                 await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, node)
                             except Exception:
