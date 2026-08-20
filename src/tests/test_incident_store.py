@@ -54,7 +54,7 @@ def test_list_all():
 def test_list_filter_by_status():
     store = _store()
     store.save(_inc("INC-20260816-001", status="OPEN"))
-    store.save(_inc("INC-20260816-002", status="RESOLVED"))
+    store.save(_inc("INC-20260816-002", status="CLOSED"))
     open_only = store.list_incidents(status="OPEN")
     assert len(open_only) == 1
     assert open_only[0].status == "OPEN"
@@ -88,7 +88,7 @@ def test_resolve_existing():
     ok = store.resolve(inc.incident_id)
     assert ok is True
     updated = store.get_by_id(inc.incident_id)
-    assert updated.status == "RESOLVED"
+    assert updated.status == "CLOSED"
 
 
 def test_resolve_nonexistent():
@@ -108,12 +108,12 @@ def test_save_overwrites_on_same_id():
         primary_event="updated event",
         secondary_nodes=[],
         raw_log_count=1,
-        status="RESOLVED",
+        status="CLOSED",
     )
     store.save(inc_updated)
     result = store.get_by_id(inc.incident_id)
     assert result.primary_event == "updated event"
-    assert result.status == "RESOLVED"
+    assert result.status == "CLOSED"
 
 
 def test_created_at_tz_preserved():

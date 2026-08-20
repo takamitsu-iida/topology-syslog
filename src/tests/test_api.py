@@ -40,7 +40,7 @@ def test_list_incidents_with_data(client, app):
 
 def test_list_incidents_filter_by_status(client, app):
     app.state.store.save(_make_inc("INC-001", status="OPEN"))
-    app.state.store.save(_make_inc("INC-002", status="RESOLVED"))
+    app.state.store.save(_make_inc("INC-002", status="CLOSED"))
     resp = client.get("/incidents", params={"status": "OPEN"})
     assert resp.status_code == 200
     body = resp.json()
@@ -68,7 +68,7 @@ def test_resolve_incident(client, app):
     app.state.store.save(_make_inc())
     resp = client.put("/incidents/INC-20260816-001/resolve")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "RESOLVED"
+    assert resp.json()["status"] == "CLOSED"
 
 
 def test_resolve_incident_not_found(client):

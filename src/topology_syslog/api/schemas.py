@@ -17,6 +17,7 @@ class IncidentOut(BaseModel):
     raw_log_count: int
     raw_logs: list[str]
     status: str
+    condition: str
     recurrence_count: int
 
 

@@ -152,7 +152,8 @@ class RootCauseInferencer:
                     secondary_nodes=[],
                     raw_log_count=len(node_msgs),
                     raw_logs=[m.message for m in node_msgs],
-                    status="FLAPPING",
+                    status="OPEN",
+                    condition="FLAPPING",
                 ))
                 assigned.add(node)
 

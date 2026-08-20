@@ -165,23 +165,23 @@ def create_app(
                             "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
                         })
 
-                    # 復旧ノードに対応するOPEN/FLAPPINGインシデントを自動RESOLVED
+                    # 復旧ノードのconditionをRECOVEREDに更新（インシデントはOPENのまま）
                     for node in recovery_nodes:
-                        resolved_ids = await asyncio.to_thread(
-                            app.state.store.resolve_by_root_cause, node
+                        recovered_ids = await asyncio.to_thread(
+                            app.state.store.recover_by_root_cause, node
                         )
-                        for rid in resolved_ids:
-                            resolved_inc = await asyncio.to_thread(
+                        for rid in recovered_ids:
+                            recovered_inc = await asyncio.to_thread(
                                 app.state.store.get_by_id, rid
                             )
-                            if resolved_inc:
+                            if recovered_inc:
                                 _logger.info(
-                                    "Auto-resolved %s (root_cause=%s sent recovery event)", rid, node
+                                    "Auto-recovered %s (root_cause=%s sent recovery event)", rid, node
                                 )
                                 await app.state.ws_manager.broadcast({
-                                    "type": "incident.resolved",
+                                    "type": "incident.recovered",
                                     "incident_id": rid,
-                                    "incident": IncidentOut.model_validate(resolved_inc).model_dump(mode="json"),
+                                    "incident": IncidentOut.model_validate(recovered_inc).model_dump(mode="json"),
                                 })
                         # ローカルストアの状態に関わらず復旧イベントが来たら常に通知する
                         if app.state.vigil_notifier is not None:
@@ -219,9 +219,9 @@ def create_app(
             while True:
                 await asyncio.sleep(24 * 3600)
                 try:
-                    purged = await asyncio.to_thread(app.state.store.purge_old_resolved, 90)
+                    purged = await asyncio.to_thread(app.state.store.purge_old_closed, 90)
                     if purged:
-                        _logger.info("Cleanup: purged %d old RESOLVED incidents (>90 days)", purged)
+                        _logger.info("Cleanup: purged %d old CLOSED incidents (>90 days)", purged)
                     if app.state.report_generator is not None:
                         purged_c = await asyncio.to_thread(app.state.report_generator.purge_cache)
                         if purged_c:

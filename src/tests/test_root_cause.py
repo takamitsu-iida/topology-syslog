@@ -297,7 +297,8 @@ def test_flapping_detected_when_same_event_repeated():
     assert len(incidents) == 1
     inc = incidents[0]
     assert inc.root_cause_node == "Leaf1"
-    assert inc.status == "FLAPPING"
+    assert inc.status == "OPEN"
+    assert inc.condition == "FLAPPING"
     assert "%LINK-3-UPDOWN" in inc.primary_event
     assert "3x" in inc.primary_event
 
@@ -311,7 +312,7 @@ def test_flapping_not_triggered_below_threshold():
     ]
     incidents = RootCauseInferencer(flapping_threshold=3).infer(msgs, engine)
     # 2 回は閾値 3 未満 → 通常インシデント（ただしメッセージが active_nodes に含まれる）
-    assert all(i.status != "FLAPPING" for i in incidents)
+    assert all(i.condition != "FLAPPING" for i in incidents)
 
 
 def test_flapping_node_excluded_from_regular_inference():
@@ -331,12 +332,14 @@ def test_flapping_node_excluded_from_regular_inference():
         _msg("Switch1", "%LINK-3-UPDOWN: Interface Gi0/1 down"),
     ]
     incidents = RootCauseInferencer(flapping_threshold=3).infer(msgs, engine)
+    conditions = {i.root_cause_node: i.condition for i in incidents}
     statuses = {i.root_cause_node: i.status for i in incidents}
-    # Switch1 は FLAPPING インシデント
-    assert statuses.get("Switch1") == "FLAPPING"
+    # Switch1 は FLAPPING condition
+    assert conditions.get("Switch1") == "FLAPPING"
     # Router1 は通常インシデント（Switch1 を secondary として持たない）
     router_inc = next(i for i in incidents if i.root_cause_node == "Router1")
     assert router_inc.status == "OPEN"
+    assert router_inc.condition == "ACTIVE"
     assert "Switch1" not in router_inc.secondary_nodes
 
 

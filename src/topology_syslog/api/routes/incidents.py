@@ -18,11 +18,12 @@ def _get_store(request: Request) -> IncidentStore:
 @router.get("/incidents", response_model=IncidentListOut)
 def list_incidents(
     status: str | None = None,
+    condition: str | None = None,
     from_dt: datetime | None = None,
     to_dt: datetime | None = None,
     store: IncidentStore = Depends(_get_store),
 ) -> IncidentListOut:
-    incidents = store.list_incidents(status=status, from_dt=from_dt, to_dt=to_dt)
+    incidents = store.list_incidents(status=status, condition=condition, from_dt=from_dt, to_dt=to_dt)
     return IncidentListOut(
         incidents=[IncidentOut.model_validate(i) for i in incidents],
         total=len(incidents),

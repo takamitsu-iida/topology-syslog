@@ -30,6 +30,7 @@ class _IncidentRow(_Base):
     raw_log_count     = Column(Integer,  nullable=False)
     raw_logs          = Column(JSON,     nullable=False, server_default="[]")
     status            = Column(String,   nullable=False)
+    condition         = Column(String,   nullable=False, server_default="'ACTIVE'")
     recurrence_count  = Column(Integer,  nullable=False, server_default="0")
 
 
@@ -52,6 +53,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         raw_log_count=inc.raw_log_count,
         raw_logs=inc.raw_logs[:_RAW_LOGS_CAP],
         status=inc.status,
+        condition=inc.condition,
         recurrence_count=inc.recurrence_count,
     )
 
@@ -66,6 +68,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         raw_log_count=row.raw_log_count,
         raw_logs=list(row.raw_logs or []),
         status=row.status,
+        condition=row.condition or "ACTIVE",
         recurrence_count=int(row.recurrence_count or 0),
     )
 
@@ -82,6 +85,7 @@ class IncidentStore:
             for ddl in [
                 "ALTER TABLE incidents ADD COLUMN raw_logs JSON",
                 "ALTER TABLE incidents ADD COLUMN recurrence_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE incidents ADD COLUMN condition TEXT NOT NULL DEFAULT 'ACTIVE'",
             ]:
                 try:
                     conn.execute(text(ddl))
@@ -102,6 +106,7 @@ class IncidentStore:
     def list_incidents(
         self,
         status: str | None = None,
+        condition: str | None = None,
         from_dt: datetime | None = None,
         to_dt: datetime | None = None,
     ) -> list[Incident]:
@@ -109,6 +114,8 @@ class IncidentStore:
             stmt = select(_IncidentRow)
             if status:
                 stmt = stmt.where(_IncidentRow.status == status)
+            if condition:
+                stmt = stmt.where(_IncidentRow.condition == condition)
             if from_dt:
                 stmt = stmt.where(_IncidentRow.created_at >= from_dt.replace(tzinfo=None))
             if to_dt:
@@ -117,25 +124,27 @@ class IncidentStore:
             return [_from_row(r) for r in session.scalars(stmt).all()]
 
     def resolve(self, incident_id: str) -> bool:
+        """オペレーターによるインシデントのクローズ（status = CLOSED）。"""
         with Session(self._engine) as session:
             row = session.get(_IncidentRow, incident_id)
             if row is None:
                 return False
-            row.status = "RESOLVED"
+            row.status = "CLOSED"
             session.commit()
             return True
 
-    def resolve_by_root_cause(self, root_cause_node: str) -> list[str]:
-        """指定根本原因ノードのOPEN/FLAPPINGインシデントをRESOLVEDにして、そのIDリストを返す。"""
+    def recover_by_root_cause(self, root_cause_node: str) -> list[str]:
+        """復旧イベント到着時に、指定根本原因ノードのOPENインシデントのconditionをRECOVEREDに更新してIDリストを返す。"""
         with Session(self._engine) as session:
             rows = session.scalars(
                 select(_IncidentRow)
                 .where(_IncidentRow.root_cause == root_cause_node)
-                .where(_IncidentRow.status.in_(["OPEN", "FLAPPING"]))
+                .where(_IncidentRow.status == "OPEN")
+                .where(_IncidentRow.condition.in_(["ACTIVE", "FLAPPING"]))
             ).all()
             ids = [r.incident_id for r in rows]
             for row in rows:
-                row.status = "RESOLVED"
+                row.condition = "RECOVERED"
             session.commit()
             return ids
 
@@ -175,14 +184,14 @@ class IncidentStore:
             by_id = {r.incident_id: _from_row(r) for r in rows}
             return [by_id[i] for i in ids if i in by_id]
 
-    def purge_old_resolved(self, days: int = 90) -> int:
-        """RESOLVED かつ days 日以上前のインシデントを削除して削除件数を返す。"""
+    def purge_old_closed(self, days: int = 90) -> int:
+        """CLOSED かつ days 日以上前のインシデントを削除して削除件数を返す。"""
         from datetime import timedelta
         cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
         with Session(self._engine) as session:
             rows = session.scalars(
                 select(_IncidentRow)
-                .where(_IncidentRow.status == "RESOLVED")
+                .where(_IncidentRow.status == "CLOSED")
                 .where(_IncidentRow.created_at < cutoff)
             ).all()
             count = len(rows)
