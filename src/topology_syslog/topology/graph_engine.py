@@ -60,6 +60,15 @@ class GraphEngine:
     def node_exists(self, node_id: str) -> bool:
         return node_id in self._graph
 
+    def get_node_attrs(self, node_id: str) -> dict:
+        return dict(self._graph.nodes.get(node_id, {}))
+
+    def get_direct_neighbors(self, node_id: str) -> list[str]:
+        """直接隣接ノード（上流・下流を問わず）を返す。"""
+        preds = list(self._graph.predecessors(node_id))
+        succs = list(self._graph.successors(node_id))
+        return list(dict.fromkeys(preds + succs))  # 順序を保ちつつ重複除去
+
     @property
     def nodes(self) -> list[str]:
         return list(self._graph.nodes)

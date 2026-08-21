@@ -50,3 +50,15 @@ export interface TopologyGraphResponse {
     edges: CytoscapeElement[]
   }
 }
+
+export interface FilterPatternsResponse {
+  patterns: string[]
+  count: number
+  ignore_file: string | null
+}
+
+export interface FilterReloadResponse {
+  status: string
+  patterns: string[]
+  count: number
+}

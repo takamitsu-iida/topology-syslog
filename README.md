@@ -30,6 +30,7 @@
 | REST API | インシデント CRUD、トポロジー参照・リロード |
 | Web UI | React + Cytoscape.js によるトポロジービジュアライザー付きダッシュボード |
 | **AI 障害レポート** | OpenAI / Ollama による障害分析レポート生成（RAG + キャッシュ対応） |
+| **装置調査エージェント** | インシデント発生時に pyATS で実機 SSH 接続して状態収集。どの装置に何のコマンドを実行するかを LLM が自律判断 |
 | YANG モデル | `iida-network-model` サブモジュールで物理・L2・L3・管理レイヤーを定義 |
 
 ---
@@ -288,6 +289,10 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `OLLAMA_MODEL` | `llama3` | Ollama のモデル名 |
 | `VIGIL_URL` | — | vigil の URL（設定するとインシデントを転送） |
 | `VIGIL_TEAM` | `default` | vigil のチーム名 |
+| `INVESTIGATION_ENABLED` | `false` | 装置調査エージェントの有効化 |
+| `PYATS_TESTBED_FILE` | — | pyATS testbed YAML ファイルのパス（`INVESTIGATION_ENABLED=true` の場合必須） |
+| `INVESTIGATION_MAX_TURNS` | `8` | LLM エージェントの最大ターン数 |
+| `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
 
 ---
 
@@ -417,6 +422,8 @@ network-model:
 | `GET` | `/incidents/{id}` | インシデント詳細 |
 | `PUT` | `/incidents/{id}/resolve` | インシデントをクローズ |
 | `POST` | `/incidents/{id}/report` | AI 障害レポートを生成（キャッシュあり） |
+| `POST` | `/incidents/{id}/investigation` | 装置調査エージェントを起動（バックグラウンド実行） |
+| `GET` | `/incidents/{id}/investigation` | 調査の進捗・結果を取得 |
 | `GET` | `/topology/nodes` | グラフのノード一覧 |
 | `GET` | `/topology/graph` | グラフ全体（Cytoscape.js 形式） |
 | `POST` | `/topology/reload` | トポロジーをファイルから再読み込み |
@@ -470,6 +477,121 @@ vigil と連携している場合、両 AI エージェントは以下のよう�
 | **vigil** | 「何をすべきか」 | 対応チェックリスト・確認コマンド・エスカレーション判断・顧客連絡文面 | オンコール担当者 |
 
 vigil の `POST /api/v1/incidents/{id}/investigate` が呼び出された際、vigil は本エンドポイント（`POST /incidents/{id}/report`）を呼び出してレポートを取得し、それを技術的背景として行動指示レポートを生成します。topology-syslog 側の AI が無効の場合は、vigil が単独で汎用レポートを生成します。
+
+---
+
+## 装置調査エージェント
+
+`INVESTIGATION_ENABLED=true` に設定すると、インシデントに対して実際のネットワーク装置に SSH 接続して状態情報を収集できます。
+
+**特徴:**
+- **LLM による自律的な調査計画**: どの装置に接続し、何のコマンドを実行するかを LLM が ReAct ループで自律判断する
+- **pyATS による装置接続**: Cisco Systems が開発するネットワーク自動化フレームワーク pyATS (unicon) を使用。Cisco IOS / IOS-XE / IOS-XR / NX-OS などのマルチベンダー接続に対応
+- **Genie パーサー**: `show ip bgp summary` などの主要コマンドは Genie が構造化データ（Python dict）に自動変換。LLM が解析しやすい形式で提供される
+- **read-only 制御**: `show` / `display` コマンドのみ許可。設定変更コマンドは実行不可
+
+### 動作の流れ
+
+```
+POST /incidents/{id}/investigation
+        │
+        ▼  バックグラウンドタスクとして起動（即 202 返却）
+        │
+        ▼
+LLM エージェント（ReAct ループ、最大 8 ターン）
+  ┌─────────────────────────────────────────────────────┐
+  │ Turn 1: インシデントを分析 → get_topology_info("Spine1") を呼び出す    │
+  │ Turn 2: Spine1 の役割・隣接情報を受け取る                              │
+  │         → run_commands("Spine1", ["show ip bgp summary", ...]) を呼ぶ │
+  │ Turn 3: コマンド出力を受け取り、必要なら隣接装置も調査                 │
+  │ Turn 4: 収集情報をもとに最終レポートを生成（finish）                   │
+  └─────────────────────────────────────────────────────┘
+        │
+        ▼
+InvestigationReport を保存 + WebSocket で investigation.done を配信
+```
+
+### セットアップ
+
+**1. pyATS をインストールする**
+
+```bash
+uv sync   # pyproject.toml に pyats・genie が含まれているため自動インストール
+```
+
+**2. pyATS testbed YAML を用意する**
+
+接続情報は pyATS 標準の testbed YAML ファイルで管理します。
+`configs/clos/testbed.yaml` がラボ環境（CML）向けのサンプルとして同梱されています。
+
+```yaml
+# configs/clos/testbed.yaml
+testbed:
+  name: agentic-ni-clos
+  credentials:
+    default:
+      username: cisco
+      password: cisco     # 本番では %ENV{DEVICE_PASSWORD} 等で環境変数化
+    enable:
+      password: cisco
+
+devices:
+  Spine1:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.1      # Loopback0（Ubuntu から BGP ファブリック経由で到達）
+        port: 22
+  # Spine2 / Leaf1 / Leaf2 / Leaf3 も同様
+```
+
+```bash
+export PYATS_TESTBED_FILE=configs/clos/testbed.yaml
+```
+
+**3. 有効化して起動する**
+
+```bash
+INVESTIGATION_ENABLED=true \
+PYATS_TESTBED_FILE=configs/clos/testbed.yaml \
+topology-syslog
+```
+
+### 使い方
+
+```bash
+# 調査を開始する（バックグラウンド実行）
+curl -X POST http://localhost:8080/incidents/INC-20260820-001/investigation
+
+# 結果を確認する
+curl http://localhost:8080/incidents/INC-20260820-001/investigation
+```
+
+```json
+{
+  "incident_id": "INC-20260820-001",
+  "status": "completed",
+  "summary": "Spine1 の GigabitEthernet0/0 がダウンし、接続する Leaf1-3 の BGP セッションが全断しました。\n\n**推奨対応**: ...",
+  "commands": [
+    {
+      "device_id": "Spine1",
+      "command": "show ip bgp summary",
+      "output": "BGP router identifier 10.0.0.1, ...",
+      "timestamp": "2026-08-20T10:00:15Z",
+      "error": null
+    }
+  ]
+}
+```
+
+WebSocket でリアルタイムに調査完了を受け取ることもできます。
+
+```json
+// /ws/incidents からの通知
+{"type": "investigation.done", "incident_id": "INC-20260820-001", "status": "completed"}
+```
 
 
 <br><br>
@@ -731,6 +853,7 @@ topology-syslog/
 │       ├── persistence/        # インシデント DB（SQLite / PostgreSQL）
 │       ├── notification/       # Webhook / Slack 通知
 │       ├── ai/                 # LLM クライアント / キャッシュ / RAG / レポート生成
+│       ├── investigation/      # 装置調査エージェント（pyATS + LLM ReAct ループ）
 │       └── api/                # FastAPI アプリ・ルーター
 └── frontend/                   # React + Vite + Tailwind CSS + Cytoscape.js
 ```

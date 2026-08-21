@@ -1,4 +1,4 @@
-import type { AiReport, Incident, IncidentListResponse, SimilarIncidentsResponse, TopologyGraphResponse } from '../types'
+import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, SimilarIncidentsResponse, TopologyGraphResponse } from '../types'
 
 /** 開発時は vite.config.ts の proxy が /incidents, /topology, /ws を localhost:8080 へ転送する */
 const BASE = ''
@@ -37,6 +37,12 @@ export const getTopologyGraph = (): Promise<TopologyGraphResponse> =>
 
 export const reloadTopology = (): Promise<{ status: string; nodes: number; edges: number }> =>
   post('/topology/reload')
+
+export const getFilterPatterns = (): Promise<FilterPatternsResponse> =>
+  get<FilterPatternsResponse>('/filter/patterns')
+
+export const reloadFilter = (): Promise<FilterReloadResponse> =>
+  post<FilterReloadResponse>('/filter/reload')
 
 export const generateAiReport = (id: string): Promise<AiReport> =>
   post<AiReport>(`/incidents/${encodeURIComponent(id)}/report`)

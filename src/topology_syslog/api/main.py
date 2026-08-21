@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from topology_syslog.api.routes.ai import router as ai_router
+from topology_syslog.api.routes.filter import router as filter_router
 from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
+from topology_syslog.api.routes.investigation import router as investigation_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
@@ -58,6 +62,10 @@ def create_app(
     ai_cache_ttl_days: int = 7,
     vigil_url: str | None = None,
     vigil_team_name: str = "default",
+    investigation_enabled: bool = False,
+    investigation_testbed_file: str | None = None,
+    investigation_max_turns: int = 8,
+    investigation_command_timeout: int = 30,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -73,6 +81,7 @@ def create_app(
             flapping_threshold=flapping_threshold,
         )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
+        app.state.ignore_file = ignore_file
         extra: list[str] = list(ignore_patterns or [])
         if ignore_file:
             app.state.syslog_filter = SyslogFilter(
@@ -84,14 +93,18 @@ def create_app(
         app.state.topology_source = topology_source
         if topology_path:
             loader = TopologyLoader()
-            g = (
-                loader.load_from_iida_json(topology_path)
-                if topology_source == "ietf-json"
-                else loader.load_from_iida_yaml(topology_path)
-            )
+            if topology_source == "ietf-json":
+                with open(topology_path) as f:
+                    topology_raw: dict = json.load(f)
+            else:
+                with open(topology_path) as f:
+                    topology_raw = yaml.safe_load(f)
+            g = loader.load_from_dict(topology_raw)
             app.state.graph = GraphEngine(g)
+            app.state.topology_raw = topology_raw
         else:
             app.state.graph = None
+            app.state.topology_raw = {}
 
         # UDP syslog 受信エンジンを起動（rsyslog が 514 を使うため 1514 等の非特権ポートを使う）
         syslog_queue: asyncio.Queue = asyncio.Queue()
@@ -215,6 +228,31 @@ def create_app(
             app.state.report_generator = ReportGenerator(llm, cache, rag)
             _logger.info("AI report generator ready (rag_path=%s)", ai_rag_path)
 
+        # 調査エージェント（オプション）— pyats / genie と testbed YAML が必要
+        app.state.investigations: dict = {}
+        app.state.investigation_agent = None
+        if investigation_enabled:
+            from topology_syslog.ai.llm_client import create_llm_client
+            from topology_syslog.investigation.agent import InvestigationAgent
+            from topology_syslog.investigation.device_connector import DeviceConnector
+            from topology_syslog.investigation.testbed_builder import TestbedBuilder
+            from topology_syslog.investigation.tools import ToolDispatcher
+
+            if not investigation_testbed_file:
+                raise ValueError(
+                    "INVESTIGATION_ENABLED=true の場合は PYATS_TESTBED_FILE の指定が必要です"
+                )
+            testbed_builder = TestbedBuilder(investigation_testbed_file)
+            connector = DeviceConnector(testbed_builder, command_timeout=investigation_command_timeout)
+            dispatcher = ToolDispatcher(connector, app.state.graph, app.state.topology_raw)
+            inv_llm = create_llm_client()
+            app.state.investigation_agent = InvestigationAgent(dispatcher, inv_llm)
+            _logger.info(
+                "Investigation agent ready (max_turns=%d, devices=%s)",
+                investigation_max_turns,
+                testbed_builder.known_devices,
+            )
+
         async def _run_cleanup() -> None:
             while True:
                 await asyncio.sleep(24 * 3600)
@@ -247,7 +285,9 @@ def create_app(
     )
     app.include_router(incidents_router)
     app.include_router(topology_router)
+    app.include_router(filter_router)
     app.include_router(ws_router)
     app.include_router(ingest_router)
     app.include_router(ai_router)
+    app.include_router(investigation_router)
     return app

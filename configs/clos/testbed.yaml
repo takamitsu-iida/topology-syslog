@@ -1,0 +1,73 @@
+# pyATS testbed YAML — agentic-ni-clos
+#
+# 【接続方式】
+#   Ubuntu (192.168.100.1) → Leaf1 (192.168.100.2) をデフォルトゲートウェイとして
+#   BGP ファブリック経由で各装置の Loopback0 へ SSH 接続する。
+#
+#   Ubuntu 側に静的ルートが必要（cloud-init で自動設定済み）:
+#     sudo ip route add 10.0.0.0/8 via 192.168.100.2
+#
+# 【認証情報】
+#   全装置共通: username cisco / password cisco (privilege 15 直付け)
+#   enable パスワードも同じく cisco
+#   本番環境では変更すること。環境変数で渡す場合は %ENV{VAR_NAME} 記法が使える。
+#
+# Loopback0 アドレス体系 (cml_lab.yaml より):
+#   Spine1 : 10.0.0.1    Spine2 : 10.0.0.2
+#   Leaf1  : 10.0.0.11   Leaf2  : 10.0.0.12   Leaf3  : 10.0.0.13
+
+testbed:
+  name: agentic-ni-clos
+  credentials:
+    default:
+      username: cisco
+      password: cisco
+    enable:
+      password: cisco
+
+devices:
+
+  Spine1:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.1        # Loopback0 — Ubuntu から BGP ファブリック経由で到達
+        port: 22
+
+  Spine2:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.2        # Loopback0
+        port: 22
+
+  Leaf1:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.11       # Loopback0 — Ubuntu から BGP ファブリック経由で到達
+        port: 22
+
+  Leaf2:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.12       # Loopback0
+        port: 22
+
+  Leaf3:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.13       # Loopback0
+        port: 22

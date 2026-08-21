@@ -18,7 +18,7 @@
 
 ## 進捗サマリー
 
-> 最終更新: 2026-08-17
+> 最終更新: 2026-08-20
 
 | フェーズ | 状態 | 備考 |
 |---|---|---|
@@ -31,6 +31,7 @@
 | Phase 6: BGPピアリングのグラフエッジ化 | ✅ 完了 | 109 tests passed (累計) |
 | Phase 7: AI 障害レポート | ✅ 完了 | OpenAI/Ollama 対応、RAG+キャッシュ、UI統合 |
 | Phase 8: 推論エンジン強化 | ✅ 完了 | 127 tests passed (累計) |
+| Phase 9: 装置調査エージェント | ✅ 完了 | pyATS + LLM ReAct ループ |
 
 ---
 
@@ -47,6 +48,7 @@
 | **Phase 6** | BGPピアリングのグラフエッジ化 | iBGP等でトポロジーと一致しないピアもインシデント集約対象にする | `yang_topology.yaml`, `yang_loader.py`, `graph_engine.py`, フロントエンド | ✅ 完了 |
 | **Phase 7** | AI 障害レポート | LLM による障害分析レポート自動生成（RAG + クエリキャッシュ） | `ai/` モジュール、`/incidents/{id}/report` API、UI ボタン | ✅ 完了 |
 | **Phase 8** | 推論エンジン強化 | 集約精度・カバレッジ・応答速度を段階的に改善 | `root_cause_inferencer.py`, `graph_engine.py` | ✅ 完了 |
+| **Phase 9** | 装置調査エージェント | インシデント発生時に実機へ SSH 接続して情報収集。どの装置にどのコマンドを実行するかを LLM が自律判断する ReAct エージェント | `investigation/` モジュール、`/incidents/{id}/investigation` API | ✅ 完了 |
 
 ---
 
@@ -793,3 +795,213 @@ WINDOW_SEC_MAX     = 120  # 最大ウィンドウ（秒）
 - [x] 8-4: ログを出していない共通祖先ノードがサイレント根本原因として検出される
 - [x] 8-5: バースト検知時にタイムウィンドウが自動延長される
 - [x] 既存テスト（109件）がすべてパスすること
+
+---
+
+## Phase 9: 装置調査エージェント ✅ 完了
+
+### 目的
+
+インシデントが発生した際、実際のネットワーク装置に SSH 接続して状態情報を収集する。
+どの装置にどのコマンドを実行するかは LLM が自律的に判断する **ReAct（Reasoning + Acting）エージェント**として実装する。
+
+### アーキテクチャ
+
+```
+POST /incidents/{id}/investigation
+        │
+        ▼
+InvestigationAgent.investigate(incident)
+        │
+        ├─ system prompt + インシデント情報 ─────────────────────────────┐
+        │                                                                 │
+        │  ReAct ループ（最大 8 ターン）                                  │
+        │  ┌──────────────────────────────────────────────────────────┐  │
+        │  │ LLM                                                       │  │
+        │  │  ├─ get_topology_info(device_id) を呼ぶ                   │  │
+        │  │  │       ↓ ToolDispatcher が GraphEngine から返答         │  │
+        │  │  ├─ run_commands(device_id, commands[]) を呼ぶ            │  │
+        │  │  │       ↓ DeviceConnector が pyATS で SSH 実行           │  │
+        │  │  └─ 収集結果を受け取り、次のツール呼び出しを決定            │  │
+        │  └──────────────────────────────────────────────────────────┘  │
+        │                                                                 │
+        └─ LLM が finish_reason="stop" を返したら最終レポートを生成 ──────┘
+        │
+        ▼
+InvestigationReport を app.state.investigations に保存
+WebSocket で investigation.done を配信
+```
+
+### 新規ファイル一覧
+
+| ファイル | 役割 |
+|---|---|
+| `investigation/__init__.py` | パッケージ初期化（空） |
+| `investigation/models.py` | `CommandResult`・`InvestigationReport` データクラス |
+| `investigation/credential_store.py` | 装置認証情報の管理（環境変数 or YAML ファイル） |
+| `investigation/testbed_builder.py` | yang_topology + 認証情報 → pyATS Testbed を動的生成 |
+| `investigation/device_connector.py` | pyATS (unicon) で SSH 接続・コマンド実行。Genie パーサー対応 |
+| `investigation/tools.py` | OpenAI tool スキーマ定義 + ToolDispatcher |
+| `investigation/agent.py` | ReAct ループ本体（`InvestigationAgent`） |
+| `api/routes/investigation.py` | `POST/GET /incidents/{id}/investigation` エンドポイント |
+
+### 変更ファイル一覧
+
+| ファイル | 変更内容 |
+|---|---|
+| `ai/llm_client.py` | `chat_with_tools(messages, tools) -> dict` メソッドを `LLMClient`（抽象）・`OpenAIClient`・`OllamaClient` 各クラスに追加 |
+| `topology/graph_engine.py` | `get_node_attrs(node_id)` / `get_direct_neighbors(node_id)` を追加 |
+| `api/main.py` | トポロジー読み込み時に `app.state.topology_raw` へ生データを保存。investigation コンポーネントの初期化（`INVESTIGATION_ENABLED` で制御）とルーター登録を追加 |
+| `api/routes/topology.py` | `POST /topology/reload` で `app.state.topology_raw` も更新するよう修正 |
+| `__main__.py` | `INVESTIGATION_ENABLED` / `PYATS_TESTBED_FILE` / `INVESTIGATION_MAX_TURNS` / `INVESTIGATION_COMMAND_TIMEOUT` 環境変数を `create_app()` に渡すよう追加 |
+| `requirements.txt` / `pyproject.toml` | `pyats>=24.0`・`genie>=24.0` を追加 |
+
+### 装置接続の設計（pyATS）
+
+`DeviceConnector` は pyATS の **unicon** で SSH 接続し、コマンドを実行する。
+
+```python
+# configs/clos/testbed.yaml を読み込んで接続
+testbed = TestbedBuilder.build_for("Spine1")
+device = testbed.devices["Spine1"]
+device.connect(init_config_commands=[], log_stdout=False)
+
+# Genie パーサーで構造化データを取得（対応コマンドのみ）
+parsed = device.parse("show ip bgp summary")
+# → Python dict。LLM が読みやすい構造化データとして CommandResult.parsed に格納
+
+# Genie 未対応コマンドはフォールバックで生テキスト取得
+output = device.execute("show logging")
+```
+
+**セキュリティ制御**: `show` / `display` / `ping` / `traceroute` で始まるコマンドのみ許可。それ以外はエラーとして拒否する（`_validate_command()` によるホワイトリスト制御）。
+
+**pyATS は同期 API** のため `asyncio.to_thread()` でラップして FastAPI イベントループをブロックしない。
+
+### 接続情報の管理（pyATS testbed YAML）
+
+接続情報は **pyATS 標準の testbed YAML ファイル**（`configs/clos/testbed.yaml`）で一元管理する。
+トポロジー定義（`yang_topology.yaml`）との混在を避けるため、ファイルは分離している。
+
+```yaml
+# configs/clos/testbed.yaml
+testbed:
+  name: agentic-ni-clos
+  credentials:
+    default:
+      username: cisco
+      password: cisco    # 本番では %ENV{DEVICE_PASSWORD} 等で環境変数化
+    enable:
+      password: cisco
+
+devices:
+  Spine1:
+    os: iosv
+    type: router
+    connections:
+      cli:
+        protocol: ssh
+        ip: 10.0.0.1       # Loopback0 — Ubuntu から BGP ファブリック経由で到達
+        port: 22
+  # Spine2, Leaf1, Leaf2, Leaf3 も同様
+```
+
+`TestbedBuilder` は起動時に testbed YAML を `yaml.safe_load()` で一度パースして保持し、
+`build_for(device_id)` 呼び出しごとに `loader.load(dict)` で新規 Testbed インスタンスを生成する（スレッドセーフ）。
+
+```bash
+export PYATS_TESTBED_FILE=configs/clos/testbed.yaml
+```
+
+パスワードを環境変数で渡す場合は pyATS の `%ENV{VAR_NAME}` 記法が使える。
+
+### エージェントが利用するツール
+
+| ツール名 | 説明 | 引数 |
+|---|---|---|
+| `get_topology_info` | 指定デバイスの役割・隣接ノード・インターフェース一覧を返す | `device_id: str` |
+| `run_commands` | SSH で装置に接続し show コマンドを実行して出力を返す | `device_id: str`, `commands: list[str]` |
+
+LLM は以下のような判断を自律的に行う:
+
+```
+1. インシデントの根本原因ノードが Spine1 → get_topology_info("Spine1") で隣接構成を確認
+2. BGP セッション障害のイベントタイプ → run_commands("Spine1", ["show ip bgp summary", "show ip interface brief"])
+3. 出力に "Active" セッションがない → run_commands("Leaf1", ["show ip bgp summary"]) で対向も確認
+4. 収集した情報をもとに障害概要・推奨対応を日本語でまとめる
+```
+
+### LLM の tool calling 対応
+
+`chat_with_tools()` の戻り値スキーマ（`OpenAIClient` / `OllamaClient` 共通）:
+
+```python
+{
+    "content": str | None,           # finish_reason="stop" 時の最終回答
+    "finish_reason": str,             # "stop" | "tool_calls"
+    "tool_calls": [                   # finish_reason="tool_calls" 時のみ
+        {
+            "id": str,
+            "function": {"name": str, "arguments": str},  # arguments は JSON 文字列
+        }
+    ] | None,
+}
+```
+
+Ollama は `/api/chat` エンドポイントでツール呼び出しをサポートするモデル（`llama3.1`・`qwen2.5` 等）が必要。
+
+### API エンドポイント
+
+| メソッド | パス | 説明 |
+|---|---|---|
+| `POST` | `/incidents/{id}/investigation` | 調査ジョブをバックグラウンドで開始（202相当） |
+| `GET` | `/incidents/{id}/investigation` | 調査の進捗・結果を取得 |
+
+`POST` は即座に `{"status": "running"}` を返し、調査はバックグラウンドタスクで実行される。
+完了時は WebSocket で `investigation.done` イベントをブロードキャストする。
+
+```json
+// GET /incidents/INC-20260820-001/investigation
+{
+  "incident_id": "INC-20260820-001",
+  "status": "completed",
+  "started_at": "2026-08-20T10:00:00Z",
+  "completed_at": "2026-08-20T10:02:35Z",
+  "summary": "Spine1 の GigabitEthernet0/0 がダウンし...",
+  "error": null,
+  "commands": [
+    {
+      "device_id": "Spine1",
+      "command": "show ip bgp summary",
+      "output": "...",
+      "timestamp": "2026-08-20T10:00:15Z",
+      "error": null
+    }
+  ]
+}
+```
+
+### 調査結果のストレージ
+
+現フェーズでは `app.state.investigations: dict[str, InvestigationReport]` にオンメモリで保持する。
+サーバー再起動で消えるが、運用中の調査結果は WebSocket で配信済みのため実用上の問題は少ない。
+将来は DB への永続化（`incident_investigations` テーブル）を検討する。
+
+### 主な環境変数
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `INVESTIGATION_ENABLED` | `false` | `true` で調査エージェントを有効化 |
+| `PYATS_TESTBED_FILE` | — | pyATS testbed YAML ファイルのパス（`INVESTIGATION_ENABLED=true` の場合必須） |
+| `INVESTIGATION_MAX_TURNS` | `8` | LLM エージェントの最大ターン数 |
+| `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
+
+### 完了条件
+
+- [x] `POST /incidents/{id}/investigation` で調査がバックグラウンド起動する
+- [x] LLM が `get_topology_info` / `run_commands` ツールを使って自律的に調査を進める
+- [x] pyATS で装置に SSH 接続してコマンド実行結果を取得できる
+- [x] Genie パーサー対応コマンドは構造化データが `CommandResult.parsed` に格納される
+- [x] `show` 以外のコマンドはホワイトリスト検証でエラーになる
+- [x] 調査完了後に WebSocket で `investigation.done` が配信される
+- [x] `INVESTIGATION_ENABLED=false`（デフォルト）のとき既存動作に影響しない

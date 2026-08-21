@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listIncidents, resolveIncident, reloadTopology } from '../api/client'
+import { listIncidents, resolveIncident, reloadTopology, getFilterPatterns, reloadFilter } from '../api/client'
 import { IncidentCard } from '../components/IncidentCard'
 import { useIncidentWebSocket } from '../hooks/useWebSocket'
 
@@ -13,12 +13,19 @@ const STATUS_FILTERS = [
 
 export function IncidentList() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>('OPEN')
+  const [showPatterns, setShowPatterns] = useState(false)
   const qc = useQueryClient()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['incidents', statusFilter],
     queryFn: () => listIncidents(statusFilter),
     refetchInterval: 30_000,
+  })
+
+  const { data: filterData } = useQuery({
+    queryKey: ['filter/patterns'],
+    queryFn: getFilterPatterns,
+    enabled: showPatterns,
   })
 
   const resolve = useMutation({
@@ -28,6 +35,11 @@ export function IncidentList() {
 
   const reload = useMutation({
     mutationFn: reloadTopology,
+  })
+
+  const filterReload = useMutation({
+    mutationFn: reloadFilter,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['filter/patterns'] }),
   })
 
   // 新規インシデントが WebSocket で通知されたら一覧を再取得
@@ -56,8 +68,56 @@ export function IncidentList() {
           >
             {reload.isPending ? '読み込み中…' : 'トポロジーを再読み込み'}
           </button>
+          <button
+            onClick={() => filterReload.mutate()}
+            disabled={filterReload.isPending}
+            className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            title="syslog_ignore.txt を再読み込みしてフィルターを更新します"
+          >
+            {filterReload.isPending ? '読み込み中…' : 'フィルターを再読み込み'}
+          </button>
+          {filterReload.isSuccess && (
+            <span className="text-xs text-green-600">
+              フィルター更新 ({filterReload.data?.count}件)
+            </span>
+          )}
+          {filterReload.isError && (
+            <span className="text-xs text-red-500">フィルター更新失敗</span>
+          )}
+          <button
+            onClick={() => setShowPatterns((v) => !v)}
+            className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+            title="現在有効な無視パターンを表示します"
+          >
+            {showPatterns ? 'パターンを隠す' : 'パターンを表示'}
+          </button>
         </div>
       </div>
+
+      {/* 無視パターン一覧 */}
+      {showPatterns && (
+        <div className="mb-4 rounded border bg-white p-3 shadow-sm">
+          <p className="mb-1 text-xs font-semibold text-gray-500">
+            無視パターン
+            {filterData?.ignore_file && (
+              <span className="ml-2 font-normal text-gray-400">({filterData.ignore_file})</span>
+            )}
+          </p>
+          {filterData ? (
+            filterData.patterns.length > 0 ? (
+              <ul className="space-y-0.5">
+                {filterData.patterns.map((p) => (
+                  <li key={p} className="font-mono text-xs text-gray-700">{p}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400">パターンなし</p>
+            )
+          ) : (
+            <p className="text-xs text-gray-400">読み込み中…</p>
+          )}
+        </div>
+      )}
 
       {/* ステータスフィルター */}
       <div className="mb-4 flex gap-2">

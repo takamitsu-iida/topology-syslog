@@ -1,6 +1,7 @@
 """LLM クライアント抽象化 — OpenAI / Ollama を環境変数で切り替え。"""
 from __future__ import annotations
 
+import json
 import os
 from abc import ABC, abstractmethod
 
@@ -8,6 +9,19 @@ from abc import ABC, abstractmethod
 class LLMClient(ABC):
     @abstractmethod
     def ask(self, prompt: str) -> str: ...
+
+    @abstractmethod
+    def chat_with_tools(self, messages: list[dict], tools: list[dict]) -> dict:
+        """ツール呼び出しをサポートするチャット API。
+
+        Returns:
+            {
+                "content": str | None,
+                "finish_reason": "stop" | "tool_calls",
+                "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}] | None,
+            }
+        """
+        ...
 
 
 class OpenAIClient(LLMClient):
@@ -24,6 +38,28 @@ class OpenAIClient(LLMClient):
         )
         return resp.choices[0].message.content or ""
 
+    def chat_with_tools(self, messages: list[dict], tools: list[dict]) -> dict:
+        resp = self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.1,
+        )
+        choice = resp.choices[0]
+        msg = choice.message
+        tool_calls = None
+        if msg.tool_calls:
+            tool_calls = [
+                {"id": tc.id, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in msg.tool_calls
+            ]
+        return {
+            "content": msg.content,
+            "finish_reason": choice.finish_reason,
+            "tool_calls": tool_calls,
+        }
+
 
 class OllamaClient(LLMClient):
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3") -> None:
@@ -38,6 +74,33 @@ class OllamaClient(LLMClient):
         )
         resp.raise_for_status()
         return resp.json().get("response", "")
+
+    def chat_with_tools(self, messages: list[dict], tools: list[dict]) -> dict:
+        """Ollama chat API 経由のツール呼び出し (llama3.1 / qwen2.5 等の対応モデル必須)。"""
+        resp = self._client.post(
+            "/api/chat",
+            json={"model": self._model, "messages": messages, "tools": tools, "stream": False},
+        )
+        resp.raise_for_status()
+        message = resp.json().get("message", {})
+        raw_calls = message.get("tool_calls")
+        tool_calls = None
+        if raw_calls:
+            tool_calls = [
+                {
+                    "id": f"call_{i}",
+                    "function": {
+                        "name": tc["function"]["name"],
+                        "arguments": json.dumps(tc["function"]["arguments"], ensure_ascii=False),
+                    },
+                }
+                for i, tc in enumerate(raw_calls)
+            ]
+        return {
+            "content": message.get("content"),
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+            "tool_calls": tool_calls,
+        }
 
 
 def create_llm_client() -> LLMClient:

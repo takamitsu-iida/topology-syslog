@@ -174,6 +174,10 @@ def main() -> None:
         ai_cache_ttl_days=int(os.getenv("AI_CACHE_TTL_DAYS", "7")),
         vigil_url=os.getenv("VIGIL_URL") or None,
         vigil_team_name=os.getenv("VIGIL_TEAM", "default"),
+        investigation_enabled=os.getenv("INVESTIGATION_ENABLED", "false").lower() == "true",
+        investigation_testbed_file=os.getenv("PYATS_TESTBED_FILE") or None,
+        investigation_max_turns=int(os.getenv("INVESTIGATION_MAX_TURNS", "8")),
+        investigation_command_timeout=int(os.getenv("INVESTIGATION_COMMAND_TIMEOUT", "30")),
     )
 
     uvicorn.run(

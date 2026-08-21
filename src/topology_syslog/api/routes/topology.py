@@ -1,6 +1,9 @@
 """トポロジー参照・リロードエンドポイント。"""
 from __future__ import annotations
 
+import json
+
+import yaml
 from fastapi import APIRouter, HTTPException, Request
 
 from topology_syslog.topology.graph_engine import GraphEngine
@@ -41,10 +44,13 @@ def reload_topology(request: Request) -> dict:
     if path is None:
         raise HTTPException(status_code=503, detail="Topology path not configured")
     loader = TopologyLoader()
-    new_g = (
-        loader.load_from_iida_json(path)
-        if source == "ietf-json"
-        else loader.load_from_iida_yaml(path)
-    )
+    if source == "ietf-json":
+        with open(path) as f:
+            raw = json.load(f)
+    else:
+        with open(path) as f:
+            raw = yaml.safe_load(f)
+    new_g = loader.load_from_dict(raw)
     graph.update_graph(new_g)
+    request.app.state.topology_raw = raw
     return {"status": "reloaded", "nodes": len(new_g.nodes), "edges": len(new_g.edges)}
