@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from topology_syslog.api.routes.ai import router as ai_router
+from topology_syslog.maintenance.checker import MaintenanceChecker
 from topology_syslog.api.routes.filter import router as filter_router
 from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
@@ -66,11 +67,15 @@ def create_app(
     investigation_testbed_file: str | None = None,
     investigation_max_turns: int = 8,
     investigation_command_timeout: int = 30,
+    maintenance_dir: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
         app.state.ws_manager = ConnectionManager()
+        app.state.maintenance_checker = (
+            MaintenanceChecker(maintenance_dir) if maintenance_dir else None
+        )
         if vigil_url:
             from topology_syslog.notification.vigil import VigilNotifier
             app.state.vigil_notifier = VigilNotifier(vigil_url, team_name=vigil_team_name)
@@ -157,12 +162,29 @@ def create_app(
                         if m.is_recovery and graph.node_exists(m.hostname)
                     }
 
+                    if app.state.maintenance_checker is not None:
+                        app.state.maintenance_checker.reload_if_changed()
+
                     incidents = app.state.inferencer.infer(non_recovery, graph)
                     _logger.info(
                         "Inferred %d incident(s) from %d syslog(s) (%d recovery event(s))",
                         len(incidents), len(non_recovery), len(msgs) - len(non_recovery),
                     )
+
+                    now_utc = datetime.now(tz=timezone.utc)
                     for inc in incidents:
+                        if app.state.maintenance_checker is not None:
+                            plan = app.state.maintenance_checker.find_active_plan(
+                                inc, at=now_utc, graph=graph
+                            )
+                            if plan is not None:
+                                inc.status = "CLOSED"
+                                inc.maintenance_plan_id = plan.plan_id
+                                _logger.info(
+                                    "Auto-closed %s (root_cause=%s): matches maintenance plan %s '%s'",
+                                    inc.incident_id, inc.root_cause_node,
+                                    plan.plan_id, plan.title,
+                                )
                         # 保存前に過去の同根本原因インシデント数を記録（再発判定）
                         inc.recurrence_count = await asyncio.to_thread(
                             app.state.store.count_by_root_cause, inc.root_cause_node

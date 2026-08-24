@@ -76,6 +76,12 @@ def _run_ingest(args: argparse.Namespace) -> None:
         from topology_syslog.persistence.incident_store import IncidentStore
         store = IncidentStore(database_url)
 
+    maintenance_checker = None
+    maintenance_dir = os.getenv("MAINTENANCE_DIR")
+    if maintenance_dir:
+        from topology_syslog.maintenance.checker import MaintenanceChecker
+        maintenance_checker = MaintenanceChecker(maintenance_dir)
+
     output_json: bool = args.json
 
     file_path: str = args.ingest  # "-" or filename
@@ -88,6 +94,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
                 window_sec=window_sec,
                 output_json=output_json,
                 store=store,
+                maintenance_checker=maintenance_checker,
             )
         )
     else:
@@ -99,6 +106,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
             window_sec=window_sec,
             output_json=output_json,
             store=store,
+            maintenance_checker=maintenance_checker,
         )
 
     print(f"\n{count} incident(s) found.", file=sys.stderr)
@@ -178,6 +186,7 @@ def main() -> None:
         investigation_testbed_file=os.getenv("PYATS_TESTBED_FILE") or None,
         investigation_max_turns=int(os.getenv("INVESTIGATION_MAX_TURNS", "8")),
         investigation_command_timeout=int(os.getenv("INVESTIGATION_COMMAND_TIMEOUT", "30")),
+        maintenance_dir=os.getenv("MAINTENANCE_DIR") or None,
     )
 
     uvicorn.run(

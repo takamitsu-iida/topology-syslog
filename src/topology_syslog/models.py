@@ -28,3 +28,4 @@ class Incident:
     status: str = "OPEN"      # オペレーター管理のライフサイクル: "OPEN" | "CLOSED"
     condition: str = "ACTIVE"  # ネットワーク現在状況（自動更新）: "ACTIVE" | "RECOVERED" | "FLAPPING"
     recurrence_count: int = 0  # 同一根本原因の過去インシデント件数（保存直前に設定）
+    maintenance_plan_id: str | None = None  # メンテナンス計画によって自動クローズされた場合の計画 ID

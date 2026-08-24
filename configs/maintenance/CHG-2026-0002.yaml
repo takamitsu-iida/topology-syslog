@@ -1,0 +1,60 @@
+# メンテナンス計画書 — iida-network-maintenance 形式
+#
+# 対象トポロジー: configs/clos/yang_topology.yaml (IP CLOS / BGP ファブリック)
+# 機器 ID は yang_topology.yaml の physical-layer/device/device-id と一致させること。
+
+maintenance-plans:
+  plan:
+    - plan-id: "CHG-2026-0002"
+      title: "Leaf2 光トランシーバー交換 (GigabitEthernet0/1)"
+      description: |
+        Leaf2 の GigabitEthernet0/1 (Spine1 向け上流リンク) の光トランシーバー (SFP+) を交換する。
+        交換時に当該インタフェースを no shutdown → shutdown → 物理交換 → no shutdown する手順のため、
+        リンクダウン/アップ系の syslog が複数回発出される見込み。
+        Spine2 経由の冗長パスがあるため、エンドユーザへのサービス影響なし。
+      scheduled-start: "2026-08-26T10:00:00+09:00"
+      scheduled-end:   "2026-08-26T11:00:00+09:00"
+      status: planned
+      created-by: "iida"
+      risk-level: low
+
+      affected-device:
+        - device-id: "Leaf2"
+          scope: device-only
+          note: "GigabitEthernet0/1 の SFP+ トランシーバー交換。インタフェースの up/down が数回発生する。"
+
+        - device-id: "Spine1"
+          scope: device-only
+          note: "Leaf2 向け GigabitEthernet0/1 のリンクダウン検知が発生する。"
+
+      # リンク系のイベントのみ抑制し、それ以外 (CPU/メモリ警告など) はインシデントとして扱う
+      expected-syslog-pattern:
+        - '%LINEPROTO-5-UPDOWN'       # インタフェース UP/DOWN
+        - '%LINK-3-UPDOWN'            # ハードウェアリンク状態変化
+        - '%BGP-5-ADJCHG'             # BGP セッション状態変化
+        - 'Interface GigabitEthernet0/1.*changed state'
+
+    - plan-id: "CHG-2026-0003"
+      title: "深夜定期メンテナンス — 全 Spine ACL 更新"
+      description: |
+        セキュリティポリシー改定に伴い、Spine1・Spine2 の管理プレーン ACL を更新する。
+        ACL の適用は設定投入直後に有効となるため、接続断は発生しないが、
+        設定変更ログ (SYS-5-CONFIG_I) が大量に出力される見込み。
+      scheduled-start: "2026-08-27T01:00:00+09:00"
+      scheduled-end:   "2026-08-27T02:00:00+09:00"
+      status: planned
+      created-by: "iida"
+      risk-level: low
+
+      affected-device:
+        - device-id: "Spine1"
+          scope: device-only
+          note: "管理プレーン ACL を access-list 100/101 へ更新。"
+
+        - device-id: "Spine2"
+          scope: device-only
+          note: "同上。"
+
+      expected-syslog-pattern:
+        - '%SYS-5-CONFIG_I'           # 設定変更ログ
+        - '%SEC-6-IPACCESSLOGP'       # ACL ヒットログ（適用直後に一時的に発出される）

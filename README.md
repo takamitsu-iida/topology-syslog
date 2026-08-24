@@ -32,6 +32,7 @@
 | **AI 障害レポート** | OpenAI / Ollama による障害分析レポート生成（RAG + キャッシュ対応） |
 | **装置調査エージェント** | インシデント発生時に pyATS で実機 SSH 接続して状態収集。どの装置に何のコマンドを実行するかを LLM が自律判断 |
 | YANG モデル | `iida-network-model` サブモジュールで物理・L2・L3・管理レイヤーを定義 |
+| **メンテナンス計画** | 作業計画 YAML を読み込み、計画内機器からのインシデントを自動クローズ |
 
 ---
 
@@ -234,6 +235,95 @@ BGP エッジ（物理接続を持たない論理ピアリング）は、宛先�
 - 復旧判定はパターンマッチング（正規表現）のみで行います。トポロジー情報（どのインターフェースが対応するか）は現在考慮していません。
 - 同一ウィンドウ内にリンクダウンとリンクアップが混在する場合（高速フラッピング）、`condition = FLAPPING` のインシデントが生成されます。
 
+### 8. メンテナンス計画による自動クローズ
+
+ネットワーク保守作業中は、意図的な操作によって SYSLOG が発出されます。
+`configs/maintenance/` に置いた作業計画 YAML を読み込み、計画の時間枠内・対象機器からのインシデントを自動的に `CLOSED` にします。
+
+**動作フロー:**
+
+```
+ウィンドウ内の SYSLOG を処理
+        │
+        ▼
+根本原因推論 → インシデント生成
+        │
+        ▼
+  MaintenanceChecker.find_active_plan(incident)
+  ├─ scheduled_start <= now <= scheduled_end
+  ├─ status が planned または in-progress
+  ├─ root_cause_node が affected-device のいずれかに該当（scope 考慮）
+  └─ expected-syslog-pattern が指定されていれば primary_event と照合
+        │
+  該当あり ──► status=CLOSED / maintenance_plan_id=CHG-XXXX-NNNN をセットして保存
+  該当なし ──► 通常通り status=OPEN で保存
+```
+
+**作業計画 YAML の書式（`configs/maintenance/CHG-YYYY-NNNN.yaml`）:**
+
+```yaml
+maintenance-plans:
+  plan:
+    - plan-id: "CHG-2026-0001"
+      title: "Spine1 IOS-XE ファームウェアアップグレード"
+      description: |
+        install activate によるリロードが発生する。BGP セッション断あり。
+      scheduled-start: "2026-08-25T02:00:00+09:00"  # RFC 3339 / ISO 8601
+      scheduled-end:   "2026-08-25T04:00:00+09:00"
+      status: planned   # planned | in-progress | completed | cancelled
+      created-by: "iida"
+      risk-level: high  # low | medium | high
+
+      affected-device:
+        - device-id: "Spine1"        # yang_topology.yaml の device-id と一致させる
+          scope: including-links     # scope については下記参照
+          note: "インプレースアップグレード。install activate でリロード。"
+        - device-id: "Leaf1"
+          scope: device-only
+          note: "Spine1 向け eBGP セッション断 (ADJCHG) が発生する。"
+
+      # 省略時 → 上記機器からのすべての SYSLOG を抑制
+      # 指定時 → 1 件以上一致したものだけ抑制（Python 正規表現）
+      expected-syslog-pattern:
+        - '%LINK-3-UPDOWN'
+        - '%BGP-5-ADJCHG'
+```
+
+**`scope` の意味:**
+
+| 値 | 抑制対象 |
+|---|---|
+| `device-only` | その機器からのイベントのみ |
+| `including-links` | その機器 ＋ 直接隣接ノード（リンクフラップが隣接装置にも波及する場合） |
+| `including-downstream` | その機器 ＋ トポロジーグラフ上の全下流ノード（Spine 停止で Leaf が連鎖する場合） |
+
+**`expected-syslog-pattern` の有無による動作の違い:**
+
+| パターン指定 | 動作 |
+|---|---|
+| **省略** | 対象機器からのすべてのインシデントを自動クローズ |
+| **指定あり** | `primary_event` がいずれかのパターンに一致するものだけクローズ。それ以外（例: CPU 警告）はインシデントとして残る |
+
+**ホットリロード:**
+ファイルの mtime を監視しており、変更を検知したタイムウィンドウのフラッシュ時に自動で再読み込みします。サーバーを再起動せずに計画の追加・修正が反映されます。
+
+**インシデントの `maintenance_plan_id` フィールド:**
+自動クローズされたインシデントには `maintenance_plan_id` に計画 ID（例: `CHG-2026-0001`）が記録されます。
+API レスポンスや Web UI からクローズ理由を確認できます。
+
+```json
+{
+  "incident_id": "INC-20260825-001",
+  "status": "CLOSED",
+  "maintenance_plan_id": "CHG-2026-0001",
+  "root_cause_node": "Spine1"
+}
+```
+
+**YANG モデル:**
+作業計画のスキーマは `yang/iida-network-maintenance.yang` で定義されています。
+`pyang -f tree yang/iida-network-maintenance.yang` でスキーマツリーを確認できます。
+
 ---
 
 ## セットアップ
@@ -293,6 +383,7 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `PYATS_TESTBED_FILE` | — | pyATS testbed YAML ファイルのパス（`INVESTIGATION_ENABLED=true` の場合必須） |
 | `INVESTIGATION_MAX_TURNS` | `8` | LLM エージェントの最大ターン数 |
 | `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
+| `MAINTENANCE_DIR` | — | 作業計画 YAML を置くディレクトリ（例: `configs/maintenance`） |
 
 ---
 
@@ -709,6 +800,7 @@ tail -f /var/log/network-syslog.txt | topology-syslog -i
 | `WINDOW_SEC` | タイムウィンドウ秒数（デフォルト `30`） |
 | `DATABASE_URL` | 指定するとインシデントを DB にも保存 |
 | `SYSLOG_IGNORE_FILE` | 無視パターンファイル |
+| `MAINTENANCE_DIR` | 作業計画 YAML のディレクトリ。ログのタイムスタンプ基準で判定するため、過去ログ処理でも正しい時間帯でメンテナンス抑制が適用される |
 
 ### 出力例
 
@@ -841,16 +933,21 @@ topology-syslog/
 ├── Makefile                    # start / stop / setup / test
 ├── pyproject.toml
 ├── configs/
-│   └── clos/
-│       ├── yang_topology.yaml  # トポロジー定義（編集してください）
-│       └── syslog_ignore.txt   # 無視パターン一覧
-├── yang/                       # iida-network-model YANG モデル（サブモジュール）
+│   ├── clos/
+│   │   ├── yang_topology.yaml  # トポロジー定義（編集してください）
+│   │   └── syslog_ignore.txt   # 無視パターン一覧
+│   └── maintenance/            # 作業計画 YAML（MAINTENANCE_DIR 環境変数で指定）
+│       └── CHG-YYYY-NNNN.yaml  # 1 ファイル = 1 変更申請（複数計画の定義も可）
+├── yang/                       # YANG モデル
+│   ├── iida-network-model.yang          # ネットワーク構成モデル（メインモジュール）
+│   └── iida-network-maintenance.yang    # 作業計画モデル
 ├── src/
 │   └── topology_syslog/
 │       ├── ingestion/          # SYSLOG 受信・パース・フィルター
 │       ├── topology/           # YANG → NetworkX グラフ変換
 │       ├── correlation/        # タイムウィンドウ + 根本原因推論
 │       ├── persistence/        # インシデント DB（SQLite / PostgreSQL）
+│       ├── maintenance/        # 作業計画ローダー・自動クローズ判定
 │       ├── notification/       # Webhook / Slack 通知
 │       ├── ai/                 # LLM クライアント / キャッシュ / RAG / レポート生成
 │       ├── investigation/      # 装置調査エージェント（pyATS + LLM ReAct ループ）

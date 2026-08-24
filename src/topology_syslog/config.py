@@ -37,12 +37,18 @@ class ApiConfig:
 
 
 @dataclass
+class MaintenanceConfig:
+    dir: str = "configs/maintenance"
+
+
+@dataclass
 class AppConfig:
     syslog: SyslogConfig = field(default_factory=SyslogConfig)
     correlation: CorrelationConfig = field(default_factory=CorrelationConfig)
     topology: TopologyConfig = field(default_factory=TopologyConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    maintenance: MaintenanceConfig = field(default_factory=MaintenanceConfig)
 
 
 def load_config(path: str | None = None) -> AppConfig:

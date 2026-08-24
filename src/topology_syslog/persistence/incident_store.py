@@ -29,9 +29,10 @@ class _IncidentRow(_Base):
     secondary_nodes   = Column(JSON,     nullable=False)
     raw_log_count     = Column(Integer,  nullable=False)
     raw_logs          = Column(JSON,     nullable=False, server_default="[]")
-    status            = Column(String,   nullable=False)
-    condition         = Column(String,   nullable=False, server_default="'ACTIVE'")
-    recurrence_count  = Column(Integer,  nullable=False, server_default="0")
+    status               = Column(String,   nullable=False)
+    condition            = Column(String,   nullable=False, server_default="'ACTIVE'")
+    recurrence_count     = Column(Integer,  nullable=False, server_default="0")
+    maintenance_plan_id  = Column(String,   nullable=True)
 
 
 def _make_engine(database_url: str):
@@ -55,6 +56,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         status=inc.status,
         condition=inc.condition,
         recurrence_count=inc.recurrence_count,
+        maintenance_plan_id=inc.maintenance_plan_id,
     )
 
 
@@ -70,6 +72,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         status=row.status,
         condition=row.condition or "ACTIVE",
         recurrence_count=int(row.recurrence_count or 0),
+        maintenance_plan_id=row.maintenance_plan_id,
     )
 
 
@@ -86,6 +89,7 @@ class IncidentStore:
                 "ALTER TABLE incidents ADD COLUMN raw_logs JSON",
                 "ALTER TABLE incidents ADD COLUMN recurrence_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE incidents ADD COLUMN condition TEXT NOT NULL DEFAULT 'ACTIVE'",
+                "ALTER TABLE incidents ADD COLUMN maintenance_plan_id TEXT",
             ]:
                 try:
                     conn.execute(text(ddl))

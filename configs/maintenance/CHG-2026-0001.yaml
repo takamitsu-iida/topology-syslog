@@ -1,0 +1,48 @@
+# メンテナンス計画書 — iida-network-maintenance 形式
+#
+# 対象トポロジー: configs/clos/yang_topology.yaml (IP CLOS / BGP ファブリック)
+# 機器 ID は yang_topology.yaml の physical-layer/device/device-id と一致させること。
+#
+# スケジュール時刻は RFC 3339 形式（タイムゾーン付き）で記載する。
+# status フィールドは作業進捗に応じて更新する:
+#   planned → in-progress → completed | cancelled
+
+maintenance-plans:
+  plan:
+    - plan-id: "CHG-2026-0001"
+      title: "Spine1 IOS-XE ファームウェアアップグレード"
+      description: |
+        Spine1 のファームウェアを 17.09.04 → 17.12.02 へアップグレードする。
+        アップグレード手順:
+          1. バックアップ設定をFTP転送
+          2. install add file flash:ios-xe-17.12.02.bin
+          3. install activate (リロード発生 / 約5分のダウン)
+          4. install commit
+        Spine1 に接続する Leaf1〜Leaf3 の BGP セッションが一時的に断となり、
+        リンクフラップ系の syslog が発出される見込み。
+      scheduled-start: "2026-08-25T02:00:00+09:00"
+      scheduled-end:   "2026-08-25T04:00:00+09:00"
+      status: planned
+      created-by: "iida"
+      risk-level: high
+
+      affected-device:
+        # Spine1 本体のリロードによるイベント
+        - device-id: "Spine1"
+          scope: including-links
+          note: "IOS-XE 17.12.02 へのインプレースアップグレード。install activate でリロードが発生する。"
+
+        # Spine1 との BGP セッションが落ちるため Leaf 側にも ADJCHG syslog が出る
+        - device-id: "Leaf1"
+          scope: device-only
+          note: "Spine1 へのeBGP セッション断 (ADJCHG) が発生する。Spine2 経由で迂回するため転送への影響は最小。"
+
+        - device-id: "Leaf2"
+          scope: device-only
+          note: "同上。"
+
+        - device-id: "Leaf3"
+          scope: device-only
+          note: "同上。"
+
+      # パターン未指定 → 上記機器からのすべての syslog を抑制

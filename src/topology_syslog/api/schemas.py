@@ -19,6 +19,7 @@ class IncidentOut(BaseModel):
     status: str
     condition: str
     recurrence_count: int
+    maintenance_plan_id: str | None = None
 
 
 class IncidentListOut(BaseModel):

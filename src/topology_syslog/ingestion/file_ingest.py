@@ -73,6 +73,7 @@ def _emit_incident(inc: Incident, output_json: bool) -> None:
                     "raw_log_count": inc.raw_log_count,
                     "status": inc.status,
                     "recurrence_count": inc.recurrence_count,
+                    "maintenance_plan_id": inc.maintenance_plan_id,
                 },
                 ensure_ascii=False,
             ),
@@ -88,6 +89,8 @@ def _emit_incident(inc: Incident, output_json: bool) -> None:
             lines.append(f"  Secondary   : {', '.join(inc.secondary_nodes)}")
         lines.append(f"  Logs        : {inc.raw_log_count}")
         lines.append(f"  Status      : {inc.status}")
+        if inc.maintenance_plan_id:
+            lines.append(f"  Maintenance : {inc.maintenance_plan_id}")
         print("\n".join(lines), flush=True)
 
 
@@ -98,6 +101,7 @@ def _process_window(
     syslog_filter: SyslogFilter | None,
     output_json: bool,
     store: object,  # IncidentStore | None — 型循環を避けるため object
+    maintenance_checker: object = None,  # MaintenanceChecker | None
 ) -> list[Incident]:
     """ウィンドウ内メッセージを推論してインシデントを返す。"""
     filtered = [m for m in msgs if syslog_filter is None or not syslog_filter.is_ignored(m)]
@@ -111,7 +115,19 @@ def _process_window(
         _logger.exception("inference error")
         return []
 
+    # ウィンドウ内の最小タイムスタンプを基準に判定（過去ログ処理でも正しい時刻で判定できる）
+    window_at = min(m.received_at for m in filtered)
+
     for inc in incidents:
+        if maintenance_checker is not None:
+            plan = maintenance_checker.find_active_plan(inc, at=window_at, graph=graph)
+            if plan is not None:
+                inc.status = "CLOSED"
+                inc.maintenance_plan_id = plan.plan_id
+                _logger.info(
+                    "Auto-closed %s (root_cause=%s): matches maintenance plan %s",
+                    inc.incident_id, inc.root_cause_node, plan.plan_id,
+                )
         if store is not None:
             try:
                 inc.recurrence_count = store.count_by_root_cause(inc.root_cause_node)
@@ -136,6 +152,7 @@ def run_batch(
     window_sec: int = 30,
     output_json: bool = False,
     store: object = None,
+    maintenance_checker: object = None,
 ) -> int:
     """ファイルを一括処理してインシデント総数を返す。"""
     text = Path(file_path).read_text(encoding="utf-8", errors="replace")
@@ -147,7 +164,7 @@ def run_batch(
 
     total = 0
     for window in windows:
-        total += len(_process_window(window, graph, inferencer, syslog_filter, output_json, store))
+        total += len(_process_window(window, graph, inferencer, syslog_filter, output_json, store, maintenance_checker))
     return total
 
 
@@ -159,6 +176,7 @@ async def run_stream(
     window_sec: int = 30,
     output_json: bool = False,
     store: object = None,
+    maintenance_checker: object = None,
 ) -> int:
     """標準入力をストリーミング読み込みしてインシデントを処理する。
 
@@ -179,7 +197,7 @@ async def run_stream(
             return
         msgs = buffer.copy()
         buffer.clear()
-        total += len(_process_window(msgs, graph, inferencer, syslog_filter, output_json, store))
+        total += len(_process_window(msgs, graph, inferencer, syslog_filter, output_json, store, maintenance_checker))
 
     while True:
         try:
