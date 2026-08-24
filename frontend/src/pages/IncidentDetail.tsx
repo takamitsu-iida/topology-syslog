@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { generateAiReport, getIncident, getSimilarIncidents, getTopologyGraph } from '../api/client'
+import { generateAiReport, getIncident, getInvestigation, getSimilarIncidents, getTopologyGraph, startInvestigation } from '../api/client'
 import { TopologyMap } from '../components/TopologyMap'
 
 export function IncidentDetail() {
@@ -29,6 +29,22 @@ export function IncidentDetail() {
   const { mutate: requestReport, isPending: isReporting, error: reportError } = useMutation({
     mutationFn: () => generateAiReport(id!),
     onSuccess: (data) => setAiReport(data.report),
+  })
+
+  const [investigationStarted, setInvestigationStarted] = useState(false)
+  const { mutate: triggerInvestigation, isPending: isStarting } = useMutation({
+    mutationFn: () => startInvestigation(id!),
+    onSuccess: () => setInvestigationStarted(true),
+  })
+  const { data: investigationReport } = useQuery({
+    queryKey: ['investigation', id],
+    queryFn: () => getInvestigation(id!),
+    enabled: investigationStarted,
+    // 完了 or 失敗になるまで 3 秒ごとにポーリング
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'completed' || status === 'failed' ? false : 3000
+    },
   })
 
   if (isLoading) return <div className="p-4 text-gray-500">読み込み中…</div>
@@ -175,6 +191,87 @@ export function IncidentDetail() {
               ボタンをクリックすると AI が障害の原因と対応策をレポートします。
             </p>
           )
+        )}
+      </div>
+
+      {/* 装置調査 */}
+      <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-gray-700">装置調査 (pyATS)</h2>
+          <button
+            onClick={() => triggerInvestigation()}
+            disabled={isStarting || investigationReport?.status === 'running'}
+            className="rounded bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+          >
+            {investigationReport?.status === 'running'
+              ? '調査中…'
+              : isStarting
+              ? '開始中…'
+              : investigationReport?.status === 'completed'
+              ? '再調査'
+              : '調査を開始'}
+          </button>
+        </div>
+
+        {!investigationStarted && !investigationReport && (
+          <p className="mt-3 text-sm text-gray-400">
+            ボタンをクリックすると LLM エージェントが実機に SSH 接続して状態を収集します。
+          </p>
+        )}
+
+        {investigationReport?.status === 'running' && (
+          <div className="mt-4 space-y-2 animate-pulse">
+            <div className="h-3 rounded bg-gray-200" />
+            <div className="h-3 w-5/6 rounded bg-gray-200" />
+            <div className="h-3 rounded bg-gray-200" />
+          </div>
+        )}
+
+        {investigationReport?.status === 'failed' && (
+          <p className="mt-3 text-sm text-red-600">
+            エラー: {investigationReport.error ?? '不明なエラー'}
+          </p>
+        )}
+
+        {investigationReport?.status === 'completed' && (
+          <div className="mt-3 space-y-3">
+            <div className="rounded bg-gray-50 p-4 text-sm leading-relaxed text-gray-800">
+              {investigationReport.summary.split('\n').map((line, i) => (
+                <p key={i} className={line.startsWith('#') ? 'mt-3 font-semibold' : 'mt-1'}>
+                  {line.split(/(\*\*[^*]+\*\*)/).map((seg, j) =>
+                    seg.startsWith('**') && seg.endsWith('**')
+                      ? <strong key={j}>{seg.slice(2, -2)}</strong>
+                      : <span key={j}>{seg}</span>
+                  )}
+                </p>
+              ))}
+            </div>
+
+            {investigationReport.commands.length > 0 && (
+              <details className="rounded border">
+                <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                  実行コマンド ({investigationReport.commands.length} 件)
+                </summary>
+                <div className="divide-y">
+                  {investigationReport.commands.map((cmd, i) => (
+                    <div key={i} className="p-3">
+                      <p className="text-xs text-gray-500">
+                        <span className="font-semibold text-gray-700">{cmd.device_id}</span>
+                        {' '}&gt; <code>{cmd.command}</code>
+                      </p>
+                      {cmd.error
+                        ? <p className="mt-1 text-xs text-red-500">{cmd.error}</p>
+                        : (
+                          <pre className="mt-1 max-h-40 overflow-y-auto rounded bg-gray-900 p-2 font-mono text-xs leading-4 text-green-400 whitespace-pre-wrap">
+                            {cmd.output}
+                          </pre>
+                        )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
         )}
       </div>
 

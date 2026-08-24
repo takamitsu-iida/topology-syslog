@@ -17,6 +17,24 @@ export interface AiReport {
   report: string
 }
 
+export interface CommandResult {
+  device_id: string
+  command: string
+  output: string
+  timestamp: string
+  error: string | null
+}
+
+export interface InvestigationReport {
+  incident_id: string
+  status: 'running' | 'completed' | 'failed'
+  started_at: string
+  completed_at: string | null
+  summary: string
+  error: string | null
+  commands: CommandResult[]
+}
+
 export interface SimilarIncident {
   incident_id: string
   root_cause_node: string
