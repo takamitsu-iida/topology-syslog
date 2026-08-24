@@ -500,6 +500,34 @@ network-model:
           - device-id: "Leaf2"
 ```
 
+### デバイスごとの SYSLOG severity フィルター
+
+デバイスに `syslog-min-severity` を設定すると、そのデバイスから受信した SYSLOG のうち、指定レベルより軽微なものを取り込み前に除外します。
+重要度の高い装置（Spine など）はより詳細なログを収集し、末端装置はノイズを減らす、といった使い分けができます。
+
+```yaml
+    device:
+      - device-id: "Spine1"
+        role: spine
+        syslog-min-severity: informational  # Informational (6) 以上の深刻度を受け入れる
+
+      - device-id: "Leaf1"
+        role: leaf
+        syslog-min-severity: warning        # Warning (4) 以上のみ受け入れる（Notice/Info/Debug を捨てる）
+```
+
+| 設定値 | 受け入れる severity 番号 | 除外されるもの |
+|---|---|---|
+| `debug` (7) | 0〜7 | なし（**デフォルト・未設定時**） |
+| `informational` (6) | 0〜6 | debug |
+| `notice` (5) | 0〜5 | informational / debug |
+| `warning` (4) | 0〜4 | notice / informational / debug |
+| `error` (3) | 0〜3 | warning 以下すべて |
+| `critical` (2) | 0〜2 | error 以下すべて |
+
+整数値（`0`〜`7`）でも指定できます。`syslog-min-severity` を省略したデバイスはすべての severity を受け入れます。
+`POST /topology/reload` でリロードすると設定は即時反映されます。
+
 > **ホスト名の一致**: デバイスの `device-id` は、Cisco IOS の `hostname` コマンドおよび
 > `logging origin-id hostname` で送信されるホスト名と一致させてください。
 
@@ -730,8 +758,10 @@ topology-syslog のインシデントは vigil の優先度（P1〜P4）に以�
 | 条件 | vigil 優先度 |
 |---|---|
 | ステータスが `FLAPPING` | `P2` |
-| 同一根本原因ノードで過去に発生あり（`recurrence_count > 0`） | `P2` |
+| 同一根本原因ノードで `OPEN` のインシデントが既に存在する（`recurrence_count > 0`） | `P2` |
 | それ以外 | `P3`（デフォルト） |
+
+> **`recurrence_count` の計算**: 新規インシデントを保存する直前に、同じ根本原因ノードを持つ **`status = OPEN`** のインシデント件数をカウントします。`CLOSED` になったインシデント（メンテナンス自動クローズ・手動クローズ含む）はカウント対象外です。
 
 ### vigil 側の重複排除
 

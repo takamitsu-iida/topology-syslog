@@ -7,7 +7,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Request
 
 from topology_syslog.topology.graph_engine import GraphEngine
-from topology_syslog.topology.yang_loader import TopologyLoader
+from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
 router = APIRouter(tags=["topology"])
 
@@ -53,4 +53,5 @@ def reload_topology(request: Request) -> dict:
     new_g = loader.load_from_dict(raw)
     graph.update_graph(new_g)
     request.app.state.topology_raw = raw
+    request.app.state.syslog_filter.update_device_severity(device_severity_map(new_g))
     return {"status": "reloaded", "nodes": len(new_g.nodes), "edges": len(new_g.edges)}

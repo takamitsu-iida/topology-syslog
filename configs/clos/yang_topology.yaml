@@ -17,6 +17,7 @@ network-model:
         device-type: router
         role: spine
         loopback: "10.0.0.1/32"
+        syslog-min-severity: informational  # 0(emergency)〜6(informational) を受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "To Leaf1"
@@ -33,6 +34,7 @@ network-model:
         device-type: router
         role: spine
         loopback: "10.0.0.2/32"
+        syslog-min-severity: informational  # 0(emergency)〜6(informational) を受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "To Leaf1"
@@ -50,6 +52,7 @@ network-model:
         device-type: switch
         role: leaf
         loopback: "10.0.0.11/32"
+        syslog-min-severity: warning  # 0(emergency)〜4(warning) のみ受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "Uplink to Spine1"

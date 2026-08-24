@@ -25,7 +25,7 @@ from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
 from topology_syslog.persistence.incident_store import IncidentStore
 from topology_syslog.topology.graph_engine import GraphEngine
-from topology_syslog.topology.yang_loader import TopologyLoader
+from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
 _logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ def create_app(
             g = loader.load_from_dict(topology_raw)
             app.state.graph = GraphEngine(g)
             app.state.topology_raw = topology_raw
+            app.state.syslog_filter.update_device_severity(device_severity_map(g))
         else:
             app.state.graph = None
             app.state.topology_raw = {}

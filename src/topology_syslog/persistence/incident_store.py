@@ -162,6 +162,7 @@ class IncidentStore:
             return (
                 session.query(_IncidentRow)
                 .filter(_IncidentRow.root_cause == root_cause_node)
+                .filter(_IncidentRow.status == "OPEN")
                 .count()
             )
 

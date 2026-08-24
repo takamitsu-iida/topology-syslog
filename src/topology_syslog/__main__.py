@@ -38,7 +38,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
     from topology_syslog.ingestion.file_ingest import run_batch, run_stream
     from topology_syslog.ingestion.syslog_filter import SyslogFilter
     from topology_syslog.topology.graph_engine import GraphEngine
-    from topology_syslog.topology.yang_loader import TopologyLoader
+    from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
     topology_path = args.topology or os.getenv("TOPOLOGY_PATH")
     if not topology_path:
@@ -62,6 +62,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
     syslog_filter: SyslogFilter | None = (
         SyslogFilter.from_file(ignore_file) if ignore_file else SyslogFilter()
     )
+    syslog_filter.update_device_severity(device_severity_map(g))
 
     inferencer = RootCauseInferencer(
         severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),

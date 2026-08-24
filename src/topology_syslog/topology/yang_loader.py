@@ -18,6 +18,12 @@ _ROLE_PRIORITY: dict[str, int] = {
     "other":        5,
 }
 
+# RFC 5424 severity 名 → 数値
+_SEVERITY_NAMES: dict[str, int] = {
+    "emergency": 0, "alert": 1, "critical": 2, "error": 3,
+    "warning": 4, "notice": 5, "informational": 6, "debug": 7,
+}
+
 
 class TopologyLoader:
     def load_from_iida_json(self, path: str) -> nx.DiGraph:
@@ -34,6 +40,24 @@ class TopologyLoader:
         return _build_graph(data)
 
 
+def device_severity_map(G: nx.DiGraph) -> dict[str, int]:
+    """グラフノードから syslog_min_severity 属性を抽出して {device_id: threshold} を返す。"""
+    result: dict[str, int] = {}
+    for node, attrs in G.nodes(data=True):
+        if "syslog_min_severity" in attrs:
+            result[node] = attrs["syslog_min_severity"]
+    return result
+
+
+def _parse_severity(value: str | int) -> int:
+    if isinstance(value, int):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in _SEVERITY_NAMES:
+        return _SEVERITY_NAMES[normalized]
+    return int(normalized)
+
+
 def _build_graph(data: dict) -> nx.DiGraph:
     nm = data["network-model"]
     physical = nm["physical-layer"]
@@ -44,7 +68,11 @@ def _build_graph(data: dict) -> nx.DiGraph:
         dev_id: str = dev["device-id"]
         role_str: str = dev.get("role", "other")
         role_of[dev_id] = _ROLE_PRIORITY.get(role_str, 5)
-        G.add_node(dev_id, role=role_str)
+        node_attrs: dict = {"role": role_str}
+        raw_sev = dev.get("syslog-min-severity")
+        if raw_sev is not None:
+            node_attrs["syslog_min_severity"] = _parse_severity(raw_sev)
+        G.add_node(dev_id, **node_attrs)
 
     for conn in physical.get("physical-connection", []):
         eps = conn.get("endpoint", [])
