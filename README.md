@@ -796,11 +796,38 @@ tail -f /var/log/network-syslog.txt | topology-syslog -i
 | `-i [FILE]` | ファイル指定（省略時は標準入力） |
 | `-t FILE` / `TOPOLOGY_PATH` | トポロジー定義ファイル（**必須**） |
 | `--json` | インシデントを JSON Lines 形式で出力 |
+| `--vigil-url URL` / `VIGIL_URL` | vigil の URL（設定するとインシデントを vigil へ直接転送） |
+| `--vigil-team TEAM` / `VIGIL_TEAM` | vigil のチーム名（デフォルト `default`） |
 | `TOPOLOGY_SOURCE` | トポロジー形式（`iida-yaml` / `ietf-json`） |
 | `WINDOW_SEC` | タイムウィンドウ秒数（デフォルト `30`） |
 | `DATABASE_URL` | 指定するとインシデントを DB にも保存 |
 | `SYSLOG_IGNORE_FILE` | 無視パターンファイル |
 | `MAINTENANCE_DIR` | 作業計画 YAML のディレクトリ。ログのタイムスタンプ基準で判定するため、過去ログ処理でも正しい時間帯でメンテナンス抑制が適用される |
+
+### vigil への転送（ファイル取り込み時）
+
+`--vigil-url`（または `VIGIL_URL` 環境変数）を指定すると、ファイル／ストリームから変換したインシデントを vigil の `POST /api/v1/alerts` へリアルタイムに転送します。
+
+```bash
+# 過去ログを一括処理して vigil に取り込む
+topology-syslog -i network-syslog.txt \
+  -t configs/clos/yang_topology.yaml \
+  --vigil-url http://vigil:8000 \
+  --vigil-team network
+
+# tail -f パイプで vigil にリアルタイム転送する
+tail -f /var/log/network-syslog.txt | \
+  VIGIL_URL=http://vigil:8000 VIGIL_TEAM=network \
+  topology-syslog -i -t configs/clos/yang_topology.yaml
+```
+
+JSON Lines 出力と組み合わせることも可能です（stdout に JSON を出しつつ vigil にも転送）:
+
+```bash
+topology-syslog -i syslog.txt -t topology.yaml --json --vigil-url http://vigil:8000 | jq .
+```
+
+転送に失敗した場合はログに警告を出力し、処理を継続します。vigil が起動していない場合でも SYSLOG の変換自体は正常に完了します。
 
 ### 出力例
 

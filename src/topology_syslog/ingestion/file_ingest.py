@@ -102,6 +102,7 @@ def _process_window(
     output_json: bool,
     store: object,  # IncidentStore | None — 型循環を避けるため object
     maintenance_checker: object = None,  # MaintenanceChecker | None
+    notifier: object = None,  # BaseNotifier | None
 ) -> list[Incident]:
     """ウィンドウ内メッセージを推論してインシデントを返す。"""
     filtered = [m for m in msgs if syslog_filter is None or not syslog_filter.is_ignored(m)]
@@ -135,6 +136,11 @@ def _process_window(
             except Exception:
                 _logger.warning("Failed to save incident %s", inc.incident_id)
         _emit_incident(inc, output_json)
+        if notifier is not None:
+            try:
+                notifier.send(inc)
+            except Exception:
+                _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
 
     return incidents
 
@@ -153,6 +159,7 @@ def run_batch(
     output_json: bool = False,
     store: object = None,
     maintenance_checker: object = None,
+    notifier: object = None,
 ) -> int:
     """ファイルを一括処理してインシデント総数を返す。"""
     text = Path(file_path).read_text(encoding="utf-8", errors="replace")
@@ -164,7 +171,7 @@ def run_batch(
 
     total = 0
     for window in windows:
-        total += len(_process_window(window, graph, inferencer, syslog_filter, output_json, store, maintenance_checker))
+        total += len(_process_window(window, graph, inferencer, syslog_filter, output_json, store, maintenance_checker, notifier))
     return total
 
 
@@ -177,6 +184,7 @@ async def run_stream(
     output_json: bool = False,
     store: object = None,
     maintenance_checker: object = None,
+    notifier: object = None,
 ) -> int:
     """標準入力をストリーミング読み込みしてインシデントを処理する。
 
@@ -197,7 +205,7 @@ async def run_stream(
             return
         msgs = buffer.copy()
         buffer.clear()
-        total += len(_process_window(msgs, graph, inferencer, syslog_filter, output_json, store, maintenance_checker))
+        total += len(_process_window(msgs, graph, inferencer, syslog_filter, output_json, store, maintenance_checker, notifier))
 
     while True:
         try:

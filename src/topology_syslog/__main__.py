@@ -84,6 +84,14 @@ def _run_ingest(args: argparse.Namespace) -> None:
 
     output_json: bool = args.json
 
+    notifier = None
+    vigil_url = args.vigil_url or os.getenv("VIGIL_URL")
+    if vigil_url:
+        from topology_syslog.notification.vigil import VigilNotifier
+        vigil_team = args.vigil_team or os.getenv("VIGIL_TEAM", "default")
+        notifier = VigilNotifier(vigil_url, team_name=vigil_team)
+        _logger.info("Vigil 転送を有効化: %s (team=%s)", vigil_url, vigil_team)
+
     file_path: str = args.ingest  # "-" or filename
     if file_path == "-":
         count = asyncio.run(
@@ -95,6 +103,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
                 output_json=output_json,
                 store=store,
                 maintenance_checker=maintenance_checker,
+                notifier=notifier,
             )
         )
     else:
@@ -107,6 +116,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
             output_json=output_json,
             store=store,
             maintenance_checker=maintenance_checker,
+            notifier=notifier,
         )
 
     print(f"\n{count} incident(s) found.", file=sys.stderr)
@@ -141,6 +151,17 @@ def main() -> None:
         "--json",
         action="store_true",
         help="インシデントを JSON Lines 形式で出力する",
+    )
+    parser.add_argument(
+        "--vigil-url",
+        metavar="URL",
+        help="vigil の ベース URL（例: http://vigil:8000）。VIGIL_URL 環境変数でも指定可",
+    )
+    parser.add_argument(
+        "--vigil-team",
+        metavar="TEAM",
+        default=None,
+        help="vigil へ転送する際のチーム名（デフォルト: default）。VIGIL_TEAM 環境変数でも指定可",
     )
     args = parser.parse_args()
 
