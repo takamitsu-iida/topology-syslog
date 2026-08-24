@@ -6,11 +6,14 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 # ── 設定（環境変数で上書き可） ─────────────────────────────────────────────
 TOPOLOGY_PATH   ?= configs/clos/yang_topology.yaml
 TOPOLOGY_SOURCE ?= iida-yaml
-IGNORE_FILE     ?= configs/clos/syslog_ignore.txt
+IGNORE_FILE     ?= configs/syslog_ignore.txt
 API_HOST        ?= 0.0.0.0
 API_PORT        ?= 8080
 SYSLOG_HOST     ?= 0.0.0.0
 SYSLOG_PORT     ?= 1514
+
+# .env が存在する場合のみ --env-file を渡す
+ENV_FILE_ARG := $(if $(wildcard .env),--env-file .env,)
 
 PID_DIR := .pids
 LOG_DIR := logs
@@ -58,7 +61,7 @@ start-api: | $(PID_DIR) $(LOG_DIR)
 		API_PORT=$(API_PORT) \
 		SYSLOG_HOST=$(SYSLOG_HOST) \
 		SYSLOG_PORT=$(SYSLOG_PORT) \
-		uv run python -m topology_syslog >"$(CURDIR)/$(API_LOG)" 2>&1 & echo $$! >"$(CURDIR)/$(API_PID)"; \
+		uv run $(ENV_FILE_ARG) python -m topology_syslog >"$(CURDIR)/$(API_LOG)" 2>&1 & echo $$! >"$(CURDIR)/$(API_PID)"; \
 		echo "API started (PID $$(cat $(API_PID))) — log: $(API_LOG)"; \
 	fi
 
