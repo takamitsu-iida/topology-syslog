@@ -101,6 +101,7 @@ nodes:
       router bgp 65000
        bgp router-id 10.0.0.1
        bgp log-neighbor-changes
+       timers bgp 10 30
        neighbor 10.1.11.2 remote-as 65011
        neighbor 10.1.11.2 description Leaf1
        neighbor 10.1.12.2 remote-as 65012

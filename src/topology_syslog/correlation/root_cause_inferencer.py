@@ -36,23 +36,6 @@ def _is_routing_event(message: str) -> bool:
 _SILENT_EVENT = "(inferred — node did not send SYSLOG)"
 
 
-def _split_by_time_gap(
-    messages: list[SyslogMessage],
-    gap_sec: int,
-) -> list[list[SyslogMessage]]:
-    """received_at のギャップが gap_sec 秒を超える箇所でメッセージを分割する。"""
-    if not messages:
-        return []
-    sorted_msgs = sorted(messages, key=lambda m: m.received_at)
-    clusters: list[list[SyslogMessage]] = [[sorted_msgs[0]]]
-    for msg in sorted_msgs[1:]:
-        gap = (msg.received_at - clusters[-1][-1].received_at).total_seconds()
-        if gap > gap_sec:
-            clusters.append([])
-        clusters[-1].append(msg)
-    return clusters
-
-
 def _detect_flapping(
     active: list[SyslogMessage],
     active_nodes: set[str],
@@ -107,26 +90,18 @@ class RootCauseInferencer:
         severity_threshold: int = 5,
         silent_coverage: float = 0.6,
         flapping_threshold: int = 3,
-        gap_sec: int = 0,
     ) -> None:
         self._counters: dict[str, int] = {}
         # 0=EMERG…5=NOTICE を推論対象、6=INFO / 7=DEBUG は raw_logs のみ
         self._severity_threshold = severity_threshold
         self._silent_coverage = silent_coverage
         self._flapping_threshold = flapping_threshold
-        # 0 = 無効（分割しない）
-        self._gap_sec = gap_sec
 
     def infer(
         self,
         messages: list[SyslogMessage],
         graph: GraphEngine,
     ) -> list[Incident]:
-        if self._gap_sec > 0:
-            clusters = _split_by_time_gap(messages, self._gap_sec)
-            if len(clusters) > 1:
-                return [inc for cluster in clusters for inc in self.infer(cluster, graph)]
-
         logged_nodes = {m.hostname for m in messages if graph.node_exists(m.hostname)}
         if not logged_nodes:
             return []

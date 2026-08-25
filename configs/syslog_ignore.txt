@@ -1,9 +1,10 @@
 # SYSLOG 無視パターン一覧
 # 1 行 1 パターン。メッセージ文字列にパターンが含まれていれば無視する。
 
-# --- Cisco IOS: 通常運用で発生する情報系ノイズ ---
+# --- Cisco IOS: 通常運用で発生する情報系ノイズ
 %SYS-5-CONFIG_I
 %SYS-5-LOG_CONFIG_CHANGE
+%GRUB-5-CONFIG_WRITING
 
 # --- インターフェース脆弱性通知 ---
 %LINK-2-INTVULN

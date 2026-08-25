@@ -69,7 +69,6 @@ def create_app(
     window_sec_max: int = 120,
     inference_severity_threshold: int = 5,
     flapping_threshold: int = 3,
-    correlation_gap_sec: int = 30,
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,
@@ -96,7 +95,6 @@ def create_app(
         app.state.inferencer = RootCauseInferencer(
             severity_threshold=inference_severity_threshold,
             flapping_threshold=flapping_threshold,
-            gap_sec=correlation_gap_sec,
         )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
         app.state.ignore_file = ignore_file
