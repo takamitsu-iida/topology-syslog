@@ -69,7 +69,7 @@ def create_app(
     window_sec_max: int = 120,
     inference_severity_threshold: int = 5,
     flapping_threshold: int = 3,
-    correlation_gap_sec: int = 15,
+    correlation_gap_sec: int = 30,
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,

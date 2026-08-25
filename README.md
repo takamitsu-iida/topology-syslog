@@ -95,7 +95,7 @@ CORRELATION_GAP_SEC=15 で分割:
 | `BURST_THRESHOLD` | `3` | バースト判定の件数しきい値 |
 | `WINDOW_EXTEND_FACTOR` | `2.0` | ウィンドウ延長倍率 |
 | `WINDOW_SEC_MAX` | `120` | ウィンドウ延長の上限（秒） |
-| `CORRELATION_GAP_SEC` | `15` | クラスタ分割するギャップ閾値（秒）。`0` で無効 |
+| `CORRELATION_GAP_SEC` | `30` | クラスタ分割するギャップ閾値（秒）。`0` で無効 |
 
 ### 2. トポロジーグラフの構築
 
@@ -419,7 +419,7 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `BURST_THRESHOLD` | `3` | バースト判定の件数しきい値（BGP/OSPF イベントは件数によらず延長） |
 | `WINDOW_EXTEND_FACTOR` | `2.0` | バースト/ルーティングイベント検出時のウィンドウ延長倍率 |
 | `WINDOW_SEC_MAX` | `120` | ウィンドウ延長の上限（秒） |
-| `CORRELATION_GAP_SEC` | `15` | 同一ウィンドウ内のクラスタ分割ギャップ（秒）。`0` で無効 |
+| `CORRELATION_GAP_SEC` | `30` | 同一ウィンドウ内のクラスタ分割ギャップ（秒）。`0` で無効 |
 | `DATABASE_URL` | `sqlite:///./incidents.db` | インシデント DB の接続先 |
 | `AI_ENABLED` | `false` | AI レポート機能の有効化 |
 | `LLM_PROVIDER` | `openai` | LLM プロバイダー（`openai` / `ollama`） |

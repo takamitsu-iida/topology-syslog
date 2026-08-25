@@ -67,7 +67,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
     inferencer = RootCauseInferencer(
         severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),
         flapping_threshold=int(os.getenv("FLAPPING_THRESHOLD", "3")),
-        gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "15")),
+        gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "30")),
     )
 
     window_sec = int(os.getenv("WINDOW_SEC", "30"))
@@ -200,7 +200,7 @@ def main() -> None:
         window_sec_max=int(os.getenv("WINDOW_SEC_MAX", "120")),
         inference_severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),
         flapping_threshold=int(os.getenv("FLAPPING_THRESHOLD", "3")),
-        correlation_gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "15")),
+        correlation_gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "30")),
         ai_enabled=os.getenv("AI_ENABLED", "false").lower() == "true",
         ai_rag_path=os.getenv("AI_RAG_PATH", ".chromadb"),
         ai_cache_ttl_days=int(os.getenv("AI_CACHE_TTL_DAYS", "7")),

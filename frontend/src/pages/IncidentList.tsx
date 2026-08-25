@@ -49,49 +49,49 @@ export function IncidentList() {
 
   return (
     <div className="mx-auto max-w-3xl p-4">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-2 flex items-center">
         <h1 className="text-2xl font-bold text-gray-800">インシデント一覧</h1>
-        <div className="flex items-center gap-2">
-          {reload.isSuccess && (
-            <span className="text-xs text-green-600">
-              再読み込み完了 ({reload.data?.nodes}ノード / {reload.data?.edges}エッジ)
-            </span>
-          )}
-          {reload.isError && (
-            <span className="text-xs text-red-500">再読み込み失敗</span>
-          )}
-          <button
-            onClick={() => reload.mutate()}
-            disabled={reload.isPending}
-            className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            title="yang_topology.yaml を再読み込みしてグラフを更新します"
-          >
-            {reload.isPending ? '読み込み中…' : 'トポロジーを再読み込み'}
-          </button>
-          <button
-            onClick={() => filterReload.mutate()}
-            disabled={filterReload.isPending}
-            className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-            title="syslog_ignore.txt を再読み込みしてフィルターを更新します"
-          >
-            {filterReload.isPending ? '読み込み中…' : 'フィルターを再読み込み'}
-          </button>
-          {filterReload.isSuccess && (
-            <span className="text-xs text-green-600">
-              フィルター更新 ({filterReload.data?.count}件)
-            </span>
-          )}
-          {filterReload.isError && (
-            <span className="text-xs text-red-500">フィルター更新失敗</span>
-          )}
-          <button
-            onClick={() => setShowPatterns((v) => !v)}
-            className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-            title="現在有効な無視パターンを表示します"
-          >
-            {showPatterns ? 'パターンを隠す' : 'パターンを表示'}
-          </button>
-        </div>
+      </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => reload.mutate()}
+          disabled={reload.isPending}
+          className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          title="yang_topology.yaml を再読み込みしてグラフを更新します"
+        >
+          {reload.isPending ? '読み込み中…' : 'トポロジーを再読み込み'}
+        </button>
+        <button
+          onClick={() => filterReload.mutate()}
+          disabled={filterReload.isPending}
+          className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          title="syslog_ignore.txt を再読み込みしてフィルターを更新します"
+        >
+          {filterReload.isPending ? '読み込み中…' : 'フィルターを再読み込み'}
+        </button>
+        <button
+          onClick={() => setShowPatterns((v) => !v)}
+          className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+          title="現在有効な無視パターンを表示します"
+        >
+          {showPatterns ? 'パターンを隠す' : 'パターンを表示'}
+        </button>
+        {reload.isSuccess && (
+          <span className="text-xs text-green-600">
+            再読み込み完了 ({reload.data?.nodes}ノード / {reload.data?.edges}エッジ)
+          </span>
+        )}
+        {reload.isError && (
+          <span className="text-xs text-red-500">再読み込み失敗</span>
+        )}
+        {filterReload.isSuccess && (
+          <span className="text-xs text-green-600">
+            フィルター更新 ({filterReload.data?.count}件)
+          </span>
+        )}
+        {filterReload.isError && (
+          <span className="text-xs text-red-500">フィルター更新失敗</span>
+        )}
       </div>
 
       {/* 無視パターン一覧 */}
