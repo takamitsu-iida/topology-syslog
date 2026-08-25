@@ -42,7 +42,7 @@
 
 ### 1. タイムウィンドウバッファ
 
-受信した SYSLOG はすぐに処理されず、**スライディングウィンドウ**（デフォルト 30 秒）に蓄積されます。
+受信した SYSLOG はすぐに処理されず、**タイムウィンドウ**（デフォルト 30 秒）に蓄積されます。
 最初のメッセージが到着してから 30 秒後に、ウィンドウ内の全メッセージをまとめて処理します。
 
 ```
@@ -52,6 +52,50 @@ t=2s  Leaf2:  %BGP-5-ADJCHANGE │
 t=3s  Leaf3:  %BGP-5-ADJCHANGE ─┘
                                 ▼ (t=30s) まとめて根本原因推論
 ```
+
+#### アダプティブウィンドウ（自動延長）
+
+ネットワーク障害では、障害が連鎖的に伝播し SYSLOG が数秒〜数十秒の間隔で続々と届きます。
+固定長ウィンドウのままでは、後から届いたログが次のウィンドウに落ちて別インシデントに分類されることがあります。
+
+そのため、以下のいずれかの条件が成立した場合、ウィンドウを自動延長します（`WINDOW_EXTEND_FACTOR` 倍、最大 `WINDOW_SEC_MAX` 秒）。
+
+| 条件 | 判定タイミング | 設定変数 |
+|---|---|---|
+| バースト検出: `BURST_WINDOW_SEC` 秒以内に `BURST_THRESHOLD` 件以上到着 | `BURST_WINDOW_SEC` 秒ごと | `BURST_THRESHOLD=3` |
+| ルーティングイベント: `%BGP-` / `%OSPF-` / `%ISIS-` / `%EIGRP-` / `%RIP-` を含む | 同上 | （常時有効） |
+
+```
+t=0s   Leaf1: %BGP-5-ADJCHANGE ─┐ ← ウィンドウ開始（30s タイマー）
+t=1s   Leaf3: %BGP-5-ADJCHANGE  │
+                                 │ ← t=5s チェック: BGP イベントあり → 60s に延長
+t=32s  Leaf2: %BGP-5-ADJCHANGE  │ ← 30s 超えでも延長ウィンドウ内
+                                 └── t=60s フラッシュ → 3件まとめて推論 → Spine2 が根本原因
+```
+
+#### 時刻ギャップによるクラスタ分割
+
+延長されたウィンドウ内に**無関係な別障害**の SYSLOG が混入した場合、誤集約が起きるリスクがあります。
+これを防ぐため、フラッシュ時にメッセージを受信時刻でソートし、`CORRELATION_GAP_SEC`（デフォルト 15 秒）を超えるギャップがある箇所でクラスタを分割します。各クラスタを独立して根本原因推論にかけます。
+
+```
+ウィンドウ内メッセージ:
+  Leaf1@t=0s, Leaf3@t=1s,   (27秒の空白),   RouterX@t=28s
+
+CORRELATION_GAP_SEC=15 で分割:
+  cluster1: [Leaf1, Leaf3]  → Spine2 をサイレント根本原因として推論 → Incident #1
+  cluster2: [RouterX]       → RouterX を根本原因として推論           → Incident #2
+```
+
+関連する環境変数:
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `BURST_WINDOW_SEC` | `5.0` | バースト判定の観測窓（秒） |
+| `BURST_THRESHOLD` | `3` | バースト判定の件数しきい値 |
+| `WINDOW_EXTEND_FACTOR` | `2.0` | ウィンドウ延長倍率 |
+| `WINDOW_SEC_MAX` | `120` | ウィンドウ延長の上限（秒） |
+| `CORRELATION_GAP_SEC` | `15` | クラスタ分割するギャップ閾値（秒）。`0` で無効 |
 
 ### 2. トポロジーグラフの構築
 
@@ -371,6 +415,11 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `API_PORT` | `8080` | バックエンド API のポート |
 | `SYSLOG_PORT` | `1514` | SYSLOG UDP 受信ポート |
 | `WINDOW_SEC` | `30` | タイムウィンドウ（秒） |
+| `BURST_WINDOW_SEC` | `5.0` | バースト判定の観測窓（秒） |
+| `BURST_THRESHOLD` | `3` | バースト判定の件数しきい値（BGP/OSPF イベントは件数によらず延長） |
+| `WINDOW_EXTEND_FACTOR` | `2.0` | バースト/ルーティングイベント検出時のウィンドウ延長倍率 |
+| `WINDOW_SEC_MAX` | `120` | ウィンドウ延長の上限（秒） |
+| `CORRELATION_GAP_SEC` | `15` | 同一ウィンドウ内のクラスタ分割ギャップ（秒）。`0` で無効 |
 | `DATABASE_URL` | `sqlite:///./incidents.db` | インシデント DB の接続先 |
 | `AI_ENABLED` | `false` | AI レポート機能の有効化 |
 | `LLM_PROVIDER` | `openai` | LLM プロバイダー（`openai` / `ollama`） |

@@ -30,6 +30,9 @@ from topology_syslog.topology.yang_loader import TopologyLoader, device_severity
 _logger = logging.getLogger(__name__)
 
 
+_ROUTING_PREFIXES = ("%BGP-", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-")
+
+
 def _burst_detected(
     buffer: list,
     burst_window_sec: float,
@@ -40,6 +43,14 @@ def _burst_detected(
         return False
     cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=burst_window_sec)
     return sum(1 for m in buffer if m.received_at >= cutoff) >= burst_threshold
+
+
+def _has_routing_events(buffer: list) -> bool:
+    """BGP/OSPF 等ルーティングイベントがバッファに含まれるか。"""
+    return any(
+        any(p in m.message for p in _ROUTING_PREFIXES)
+        for m in buffer
+    )
 
 
 def create_app(
@@ -53,11 +64,12 @@ def create_app(
     syslog_port: int = 1514,
     window_sec: int = 30,
     burst_window_sec: float = 5.0,
-    burst_threshold: int = 5,
+    burst_threshold: int = 3,
     window_extend_factor: float = 2.0,
     window_sec_max: int = 120,
     inference_severity_threshold: int = 5,
     flapping_threshold: int = 3,
+    correlation_gap_sec: int = 15,
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,
@@ -84,6 +96,7 @@ def create_app(
         app.state.inferencer = RootCauseInferencer(
             severity_threshold=inference_severity_threshold,
             flapping_threshold=flapping_threshold,
+            gap_sec=correlation_gap_sec,
         )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
         app.state.ignore_file = ignore_file
@@ -139,10 +152,13 @@ def create_app(
                 while loop.time() - start < target:
                     remaining = target - (loop.time() - start)
                     await asyncio.sleep(min(float(burst_window_sec), remaining))
-                    if not extended and _burst_detected(buffer, burst_window_sec, burst_threshold):
+                    if not extended and (
+                        _burst_detected(buffer, burst_window_sec, burst_threshold)
+                        or _has_routing_events(buffer)
+                    ):
                         new_target = min(window_sec * window_extend_factor, float(window_sec_max))
                         if new_target > target:
-                            _logger.debug("Burst detected — window extended %.0fs → %.0fs", target, new_target)
+                            _logger.debug("Routing/burst event — window extended %.0fs → %.0fs", target, new_target)
                             target = new_target
                             extended = True
 

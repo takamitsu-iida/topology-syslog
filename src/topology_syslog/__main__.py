@@ -67,6 +67,7 @@ def _run_ingest(args: argparse.Namespace) -> None:
     inferencer = RootCauseInferencer(
         severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),
         flapping_threshold=int(os.getenv("FLAPPING_THRESHOLD", "3")),
+        gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "15")),
     )
 
     window_sec = int(os.getenv("WINDOW_SEC", "30"))
@@ -194,11 +195,12 @@ def main() -> None:
         syslog_port=int(os.getenv("SYSLOG_PORT", "1514")),
         window_sec=int(os.getenv("WINDOW_SEC", "30")),
         burst_window_sec=float(os.getenv("BURST_WINDOW_SEC", "5.0")),
-        burst_threshold=int(os.getenv("BURST_THRESHOLD", "5")),
+        burst_threshold=int(os.getenv("BURST_THRESHOLD", "3")),
         window_extend_factor=float(os.getenv("WINDOW_EXTEND_FACTOR", "2.0")),
         window_sec_max=int(os.getenv("WINDOW_SEC_MAX", "120")),
         inference_severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),
         flapping_threshold=int(os.getenv("FLAPPING_THRESHOLD", "3")),
+        correlation_gap_sec=int(os.getenv("CORRELATION_GAP_SEC", "15")),
         ai_enabled=os.getenv("AI_ENABLED", "false").lower() == "true",
         ai_rag_path=os.getenv("AI_RAG_PATH", ".chromadb"),
         ai_cache_ttl_days=int(os.getenv("AI_CACHE_TTL_DAYS", "7")),
