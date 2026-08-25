@@ -113,6 +113,7 @@ nodes:
         neighbor 10.1.11.2 activate
         neighbor 10.1.12.2 activate
         neighbor 10.1.13.2 activate
+        maximum-paths 16
        exit-address-family
       !
       crypto key generate rsa modulus 2048
@@ -200,6 +201,7 @@ nodes:
         neighbor 10.2.11.2 activate
         neighbor 10.2.12.2 activate
         neighbor 10.2.13.2 activate
+        maximum-paths 16
        exit-address-family
       !
       crypto key generate rsa modulus 2048
@@ -279,6 +281,7 @@ nodes:
        neighbor 10.1.11.1 description Spine1
        neighbor 10.2.11.1 remote-as 65000
        neighbor 10.2.11.1 description Spine2
+       maximum-paths 2
        !
        address-family ipv4
         network 0.0.0.0
@@ -362,6 +365,7 @@ nodes:
        neighbor 10.1.12.1 description Spine1
        neighbor 10.2.12.1 remote-as 65000
        neighbor 10.2.12.1 description Spine2
+       maximum-paths 2
        !
        address-family ipv4
         network 10.0.0.12 mask 255.255.255.255
@@ -442,6 +446,7 @@ nodes:
         network 10.0.0.13 mask 255.255.255.255
         neighbor 10.1.13.1 activate
         neighbor 10.2.13.1 activate
+        maximum-paths 2
        exit-address-family
       !
       crypto key generate rsa modulus 2048

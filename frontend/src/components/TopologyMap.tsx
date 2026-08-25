@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
+import type { Core } from 'cytoscape'
 import type { CytoscapeElement } from '../types'
 
 interface Props {
@@ -70,15 +72,25 @@ const STYLESHEET = [
   },
 ]
 
+const LAYOUT = { name: 'breadthfirst', directed: true }
+
 export function TopologyMap({ elements, rootCauseNode, secondaryNodes }: Props) {
+  const cyRef = useRef<Core | null>(null)
   const allElements = tagElements(elements, rootCauseNode, secondaryNodes)
+
+  // elements が変わったらレイアウトを再計算する
+  useEffect(() => {
+    cyRef.current?.layout(LAYOUT).run()
+  }, [elements])
+
   return (
     <CytoscapeComponent
       elements={allElements}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       stylesheet={STYLESHEET as any}
-      layout={{ name: 'breadthfirst', directed: true } as object}
+      layout={LAYOUT as object}
       style={{ width: '100%', height: '400px', background: '#f8fafc' }}
+      cy={(cy) => { cyRef.current = cy }}
     />
   )
 }
