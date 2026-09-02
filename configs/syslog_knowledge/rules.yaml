@@ -1,0 +1,152 @@
+# SYSLOG Knowledge Base の初期サンプル。
+# 有効化するには SKB_PATH=configs/syslog_knowledge を設定する。
+rules:
+  - id: cisco-link-updown
+    description: "物理リンクの UP/DOWN 状態変化。下流機器の障害を伴う場合は根本原因候補として扱う。"
+    vendor: cisco-ios
+    signature: "%LINK-*-UPDOWN"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-2": page_immediately
+      "3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 120
+    runbook:
+      - "show interfaces <interface>"
+      - "show logging | include <interface>"
+    status: approved
+    confidence: 0.95
+    priority: 100
+
+  - id: cisco-lineproto-updown
+    description: "L3 ラインプロトコルの UP/DOWN 状態変化。物理リンク障害に続く二次影響として確認する。"
+    vendor: cisco-ios
+    signature: "%LINEPROTO-*-UPDOWN"
+    classification: line-protocol-state-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 120
+    runbook:
+      - "show interfaces <interface>"
+      - "show interfaces <interface> status"
+    status: approved
+    confidence: 0.9
+    priority: 90
+
+  - id: cisco-bgp-adjchange
+    description: "BGP ネイバーの隣接状態変化。上流リンクまたは対向装置の障害に伴う二次影響として扱う。"
+    vendor: cisco-ios
+    signature: "%BGP-*-ADJCHANGE"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip bgp summary"
+      - "show ip route <peer-address>"
+    status: approved
+    confidence: 0.95
+    priority: 100
+
+  - id: cisco-ospf-adjch
+    description: "OSPF ネイバーの隣接状態変化。リンク断や対向ルーター障害との相関を確認する。"
+    vendor: cisco-ios
+    signature: "%OSPF-*-ADJCHG"
+    classification: ospf-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip ospf neighbor"
+      - "show ip ospf interface <interface>"
+    status: approved
+    confidence: 0.9
+    priority: 100
+
+  - id: cisco-sys-config-change
+    description: "Cisco IOS の設定変更通知。通常運用の変更記録として保持し、インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%SYS-*-CONFIG_I"
+    classification: configuration-change
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    runbook:
+      - "show archive log config all"
+    status: approved
+    confidence: 0.99
+    priority: 100
+
+  - id: cisco-sys-log-config-change
+    description: "SYSLOG 出力設定の変更通知。設定変更の監査用に保持し、インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%SYS-*-LOG_CONFIG_CHANGE"
+    classification: logging-configuration-change
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    runbook:
+      - "show logging"
+    status: approved
+    confidence: 0.99
+    priority: 100
+
+  - id: cisco-grub-config-writing
+    description: "GRUB の設定書き込み通知。起動設定変更の記録として保持し、インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%GRUB-*-CONFIG_WRITING"
+    classification: boot-configuration-write
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    runbook:
+      - "show version"
+    status: approved
+    confidence: 0.99
+    priority: 100
+
+  - id: cisco-link-intvuln
+    description: "インターフェース脆弱性の通知。確認用に保持し、インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%LINK-*-INTVULN"
+    classification: interface-vulnerability-notice
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    runbook:
+      - "show interfaces <interface>"
+    status: approved
+    confidence: 0.95
+    priority: 100
+
+  # 例: 評価中のルールは pending のまま保存し、承認されるまで照合には使わない。
+  - id: cisco-cdp-native-vlan-mismatch-review
+    description: "CDP が検出したネイティブ VLAN 不一致。影響度を確認してから承認する評価中ルール。"
+    vendor: cisco-ios
+    signature: "%CDP-*-NATIVE_VLAN_MISMATCH"
+    classification: native-vlan-mismatch
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interfaces trunk"
+      - "show cdp neighbors detail"
+    status: pending
+    confidence: 0.6
+    priority: 80

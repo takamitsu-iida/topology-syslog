@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from topology_syslog.api.schemas import IncidentOut
 from topology_syslog.ingestion.syslog_parser import parse
+from topology_syslog.knowledge.policy import SeverityAction, resolve_severity_action
 
 router = APIRouter(tags=["ingest"])
 
@@ -44,7 +45,19 @@ async def ingest_syslog(request: Request, payload: IngestRequest) -> list[Incide
 
     syslog_msgs = [parse(m.raw.encode(), m.source_ip) for m in payload.messages]
 
-    # 無視フィルターを適用
+    matcher = request.app.state.knowledge_matcher
+    if matcher is not None:
+        unknown_event_store = request.app.state.unknown_event_store
+        retained_messages = []
+        for msg in syslog_msgs:
+            rule = matcher.classify(msg)
+            if msg.knowledge_status == "unknown":
+                await asyncio.to_thread(unknown_event_store.record, msg)
+            if resolve_severity_action(rule, msg.severity) != SeverityAction.RETAIN_ONLY:
+                retained_messages.append(msg)
+        syslog_msgs = retained_messages
+
+    # 旧 SYSLOG_IGNORE_FILE と装置別 severity フィルターを互換のため適用
     syslog_filter = request.app.state.syslog_filter
     syslog_msgs = [m for m in syslog_msgs if not syslog_filter.is_ignored(m)]
 

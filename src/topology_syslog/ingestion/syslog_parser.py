@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
+from topology_syslog.knowledge.normalizer import normalize
 from topology_syslog.models import SyslogMessage
 
 # Cisco IOS 形式 (%FACILITY-SEV-MNEMONIC)
@@ -42,6 +43,7 @@ def parse(raw: bytes, source_ip: str) -> SyslogMessage:
         or _fallback(text, source_ip, now)
     )
     msg.is_recovery = bool(_RECOVERY_RE.search(msg.message))
+    msg.vendor, msg.normalized_signature = normalize(msg.event_type, msg.message)
     return msg
 
 

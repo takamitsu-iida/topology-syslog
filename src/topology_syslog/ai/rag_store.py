@@ -75,3 +75,17 @@ class RAGStore:
         except Exception as exc:
             _logger.warning("RAG similar-ids search failed: %s", exc)
             return []
+
+    def search_similar_text_ids(self, text: str, n: int = 5) -> list[str]:
+        """任意の SYSLOG テキストに類似したインシデント ID を返す。"""
+        total = self._col.count()
+        if total == 0:
+            return []
+        try:
+            results = self._col.query(
+                query_texts=[text], n_results=min(n, total), include=[]
+            )
+            return results["ids"][0] if results["ids"] else []
+        except Exception as exc:
+            _logger.warning("RAG text search failed: %s", exc)
+            return []

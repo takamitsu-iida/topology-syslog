@@ -229,6 +229,7 @@ def main() -> None:
         investigation_max_turns=int(os.getenv("INVESTIGATION_MAX_TURNS", "8")),
         investigation_command_timeout=int(os.getenv("INVESTIGATION_COMMAND_TIMEOUT", "30")),
         maintenance_dir=os.getenv("MAINTENANCE_DIR") or None,
+        knowledge_path=os.getenv("SKB_PATH") or None,
     )
 
     uvicorn.run(

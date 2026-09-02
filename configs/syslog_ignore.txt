@@ -1,10 +1,3 @@
-# SYSLOG 無視パターン一覧
-# 1 行 1 パターン。メッセージ文字列にパターンが含まれていれば無視する。
-
-# --- Cisco IOS: 通常運用で発生する情報系ノイズ
-%SYS-5-CONFIG_I
-%SYS-5-LOG_CONFIG_CHANGE
-%GRUB-5-CONFIG_WRITING
-
-# --- インターフェース脆弱性通知 ---
-%LINK-2-INTVULN
+# 廃止予定: 無視ルールは configs/syslog_knowledge/rules.yaml へ移行済み。
+# SKB を有効化するには SKB_PATH=configs/syslog_knowledge を設定する。
+# このファイルにはパターンを追加しない。旧 SYSLOG_IGNORE_FILE の互換用途にのみ残す。

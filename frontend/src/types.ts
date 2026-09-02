@@ -80,3 +80,35 @@ export interface FilterReloadResponse {
   patterns: string[]
   count: number
 }
+
+export interface UnknownEvent {
+  signature: string
+  vendor: string | null
+  first_seen: string
+  last_seen: string
+  occurrence_count: number
+  severity_counts: Record<string, number>
+  nodes: string[]
+  representative_message: string
+}
+
+export interface UnknownEventListResponse {
+  events: UnknownEvent[]
+  total: number
+}
+
+export interface KnowledgeRule {
+  rule_id: string
+  signature: string
+  vendor: string | null
+  severity_policy: Record<string, string>
+  runbook: string[]
+  status: 'approved' | 'pending' | 'disabled'
+}
+
+export interface KnowledgeRuleInput {
+  rule_id: string
+  signature: string
+  vendor?: string
+  runbook?: string[]
+}

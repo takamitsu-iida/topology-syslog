@@ -17,6 +17,7 @@ from topology_syslog.api.routes.filter import router as filter_router
 from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
 from topology_syslog.api.routes.investigation import router as investigation_router
+from topology_syslog.api.routes.knowledge import router as knowledge_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
@@ -24,7 +25,10 @@ from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAct
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
+from topology_syslog.knowledge.policy import SeverityAction, resolve_severity_action
 from topology_syslog.persistence.incident_store import IncidentStore
+from topology_syslog.persistence.knowledge_audit_store import KnowledgeAuditStore
+from topology_syslog.persistence.unknown_event_store import UnknownEventStore
 from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
@@ -55,6 +59,18 @@ def _has_routing_events(buffer: list) -> bool:
 
 
 async def _process_message_immediately(app: FastAPI, msg) -> None:
+    matcher = app.state.knowledge_matcher
+    rule = None
+    if matcher is not None:
+        rule = matcher.classify(msg)
+        if msg.knowledge_status == "unknown":
+            await asyncio.to_thread(app.state.unknown_event_store.record, msg)
+
+    severity_action = resolve_severity_action(rule, msg.severity)
+    if severity_action == SeverityAction.RETAIN_ONLY:
+        _logger.debug("Retaining SYSLOG without inference: signature=%s", msg.normalized_signature)
+        return
+
     graph = app.state.graph
     if graph is None:
         _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
@@ -109,6 +125,9 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
         decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
 
         if decision.action == MergeAction.NEW:
+            if severity_action == SeverityAction.CORRELATE_ONLY:
+                _logger.debug("Suppressing new incident for correlate-only SYSLOG: %s", msg.normalized_signature)
+                continue
             await asyncio.to_thread(app.state.store.save, inc)
             if app.state.vigil_notifier is not None:
                 try:
@@ -170,10 +189,24 @@ def create_app(
     investigation_max_turns: int = 8,
     investigation_command_timeout: int = 30,
     maintenance_dir: str | None = None,
+    knowledge_path: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
+        app.state.knowledge_matcher = None
+        app.state.unknown_event_store = None
+        app.state.knowledge_audit_store = None
+        if knowledge_path:
+            from topology_syslog.knowledge.matcher import KnowledgeMatcher
+            from topology_syslog.knowledge.store import KnowledgeStore
+
+            app.state.knowledge_audit_store = KnowledgeAuditStore(database_url)
+            app.state.knowledge_matcher = KnowledgeMatcher(
+                KnowledgeStore(knowledge_path), app.state.knowledge_audit_store
+            )
+            app.state.unknown_event_store = UnknownEventStore(database_url)
+            _logger.info("SYSLOG Knowledge Base loaded from %s", knowledge_path)
         app.state.ws_manager = ConnectionManager()
         app.state.correlation_mode = correlation_mode
         app.state.merger = IncidentMerger()
@@ -313,4 +346,5 @@ def create_app(
     app.include_router(ingest_router)
     app.include_router(ai_router)
     app.include_router(investigation_router)
+    app.include_router(knowledge_router)
     return app

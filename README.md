@@ -437,7 +437,8 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 |---|---|---|
 | `TOPOLOGY_PATH` | — | トポロジー定義 YAML のパス（必須） |
 | `TOPOLOGY_SOURCE` | `iida-yaml` | トポロジー形式（`iida-yaml` / `ietf-json`） |
-| `SYSLOG_IGNORE_FILE` | — | 無視パターンファイルのパス |
+| `SKB_PATH` | — | SKB YAML ファイルまたはディレクトリ。`retain_only` ルールで通知・相関を抑制する |
+| `SYSLOG_IGNORE_FILE` | — | 旧無視パターンファイルのパス（互換用途。新規ルールは SKB を使用） |
 | `API_PORT` | `8080` | バックエンド API のポート |
 | `SYSLOG_PORT` | `1514` | SYSLOG UDP 受信ポート |
 | `CORRELATION_MODE` | `immediate` | 相関戦略（標準は `immediate`。`time_window` は旧互換レイヤーのみ） |
@@ -450,6 +451,8 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `AI_ENABLED` | `false` | AI レポート機能の有効化 |
 | `LLM_PROVIDER` | `openai` | LLM プロバイダー（`openai` / `ollama`） |
 | `OPENAI_API_KEY` | — | OpenAI API キー（`AI_ENABLED=true` の場合必要） |
+
+SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama のベース URL |
 | `OLLAMA_MODEL` | `llama3` | Ollama のモデル名 |
 | `VIGIL_URL` | — | vigil の URL（設定するとインシデントを転送） |
@@ -906,7 +909,8 @@ tail -f /var/log/network-syslog.txt | topology-syslog -i
 | `TOPOLOGY_SOURCE` | トポロジー形式（`iida-yaml` / `ietf-json`） |
 | `WINDOW_SEC` | タイムウィンドウ秒数（デフォルト `30`） |
 | `DATABASE_URL` | 指定するとインシデントを DB にも保存 |
-| `SYSLOG_IGNORE_FILE` | 無視パターンファイル |
+| `SKB_PATH` | SKB YAML ファイルまたはディレクトリ（例: `configs/syslog_knowledge`） |
+| `SYSLOG_IGNORE_FILE` | 旧無視パターンファイル（互換用途） |
 | `MAINTENANCE_DIR` | 作業計画 YAML のディレクトリ。ログのタイムスタンプ基準で判定するため、過去ログ処理でも正しい時間帯でメンテナンス抑制が適用される |
 
 ### vigil への転送（ファイル取り込み時）
@@ -1065,9 +1069,11 @@ topology-syslog/
 ├── Makefile                    # start / stop / setup / test
 ├── pyproject.toml
 ├── configs/
+│   ├── syslog_knowledge/
+│   │   └── rules.yaml          # SYSLOG 分類・Severity ポリシー・retain_only ルール
+│   ├── syslog_ignore.txt       # 旧無視パターンファイル（互換用途）
 │   ├── clos/
 │   │   ├── yang_topology.yaml  # トポロジー定義（編集してください）
-│   │   └── syslog_ignore.txt   # 無視パターン一覧
 │   └── maintenance/            # 作業計画 YAML（MAINTENANCE_DIR 環境変数で指定）
 │       └── CHG-YYYY-NNNN.yaml  # 1 ファイル = 1 変更申請（複数計画の定義も可）
 ├── yang/                       # YANG モデル

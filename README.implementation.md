@@ -33,6 +33,7 @@
 | Phase 8: 推論エンジン強化 | ✅ 完了 | 127 tests passed (累計) |
 | Phase 9: 装置調査エージェント | ✅ 完了 | pyATS + LLM ReAct ループ |
 | Phase 10: 即時推論 + 既存インシデント統合 | ✅ 完了 | 10-1〜10-7 実装完了、回帰テスト 78 passed |
+| Phase 11: SYSLOG Knowledge Base (SKB) | ✅ 完了 | 11-1〜11-8 実装完了、SKB 回帰テスト 41 passed |
 
 ---
 
@@ -51,6 +52,7 @@
 | **Phase 8** | 推論エンジン強化 | 集約精度・カバレッジ・応答速度を段階的に改善 | `root_cause_inferencer.py`, `graph_engine.py` | ✅ 完了 |
 | **Phase 9** | 装置調査エージェント | インシデント発生時に実機へ SSH 接続して情報収集。どの装置にどのコマンドを実行するかを LLM が自律判断する ReAct エージェント | `investigation/` モジュール、`/incidents/{id}/investigation` API | ✅ 完了 |
 | **Phase 10** | 即時推論 + 既存インシデント統合 | 30秒タイムウィンドウ待ちを廃止し、受信ごとに推論・既存インシデントへ統合する | `api/main.py`, `file_ingest.py`, `incident_store.py`, `incident_merger.py` | ✅ 完了 |
+| **Phase 11** | SYSLOG Knowledge Base (SKB) | 既知/未知の SYSLOG を分類し、Severity を含む運用ポリシー、対処手順、承認済み知識を継続的に活用する | `knowledge/` モジュール、SKB YAML/DB、レビュー API/UI | ✅ 完了 |
 
 ---
 
@@ -1213,3 +1215,105 @@ CORRELATION_MODE=immediate  # immediate | time_window
 - [x] 10-1: `IncidentMerger` が同一 root 追記、子孫追記、祖先昇格、無関係ログ分離を判定できる
 - [x] 10-2: `IncidentStore` が統合候補の OPEN/ACTIVE 検索と既存行の明示更新を行える
 - [ ] Phase 10 の新規/更新テストがすべてパスする
+
+---
+
+## Phase 11: SYSLOG Knowledge Base (SKB) ✅ 完了
+
+### 目的
+
+既知の SYSLOG には、承認済みの分類、Severity 別の対応方針、相関上の扱い、調査手順を適用する。未知の SYSLOG は既存ルールへ無理に当てはめず、発生状況と類似事例を蓄積し、運用者のレビュー後に知識として昇格できるようにする。
+
+Severity は RFC 5424 の `0=EMERGENCY` から `7=DEBUG` をそのまま保持し、メッセージ種別の重要度とは分離して評価する。同種イベントでも Severity ごとに、通知、インシデント化、相関のみ、保存のみを切り替える。
+
+### 基本フロー
+
+```text
+SYSLOG 受信
+  -> パース（vendor / event_type / 正規化シグネチャ）
+  -> SKB 照合
+     -> known: Severity ポリシー、相関ロール、runbook を付与
+     -> unknown: 未知イベントとして観測・類似検索・レビュー候補へ登録
+  -> 即時相関・既存インシデント統合
+  -> インシデントと運用者フィードバックを SKB へ反映
+```
+
+### 知識レコード
+
+SKB はまず Git 管理できる YAML を正本とし、未知イベントの観測・レビュー結果は DB に保存する。YAML は起動時およびリロード時に読み込み、承認済みルールだけを自動判定に使用する。
+
+```yaml
+id: cisco-link-updown
+vendor: cisco-ios
+signature: "%LINK-*-UPDOWN"
+classification: link-state-change
+correlation_role: root-cause-candidate
+severity_policy:
+  "0-2": page_immediately
+  "3": create_incident
+  "4-5": correlate_only
+  "6-7": retain_only
+dedup_window_sec: 120
+runbook:
+  - "show interfaces <interface>"
+  - "show logging | include <interface>"
+status: approved
+confidence: 0.95
+```
+
+`signature` は可変パラメーターを除いた正規化シグネチャとして扱う。たとえば `%BGP-3-ADJCHANGE` と `%BGP-5-ADJCHANGE` は同一イベント種別へ対応付け、Severity ポリシーで動作を分ける。
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 11-1 | A: データモデル | `SyslogMessage` に `normalized_signature`、`knowledge_status`、`knowledge_id`、`recommended_action`、`knowledge_confidence` を追加し、未知イベントとレビュー結果の永続モデルを定義する | `models.py`, `persistence/` | ✅ |
+| 11-2 | B: 正規化 | vendor/event_type/message から可変値と Severity を分離した正規化シグネチャを生成する。Cisco 以外は安全なフォールバックを持つ | `ingestion/syslog_parser.py`, `knowledge/normalizer.py` | ✅ |
+| 11-3 | C: SKB 照合 | YAML スキーマ検証、承認済み知識のロード、優先順位付きマッチング、ホットリロードを実装する | `knowledge/store.py`, `knowledge/matcher.py`, `configs/syslog_knowledge/` | ✅ |
+| 11-4 | D: Severity ポリシー | `page_immediately`、`create_incident`、`correlate_only`、`retain_only` を判定し、既存の推論閾値と整合させる | `knowledge/policy.py`, `api/main.py`, `correlation/` | ✅ |
+| 11-5 | E: 未知イベント管理 | 未知シグネチャの件数、初回/最終観測時刻、代表ログ、Severity 分布、関連ノードを集約して保存する | `persistence/unknown_event_store.py`, `api/routes/knowledge.py` | ✅ |
+| 11-6 | F: 類似事例とレビュー | 既存 RAG で類似インシデント・既知ルール候補を提示し、運用者が承認、抑制、runbook 更新を行える API/UI を追加する | `ai/rag_store.py`, `api/routes/knowledge.py`, `frontend/src/` | ✅ |
+| 11-7 | G: 監査・運用 | 知識ルールの作成者、承認者、版、適用履歴を記録し、誤判定時にルールを無効化・ロールバック可能にする | `knowledge/`, `persistence/` | ✅ |
+| 11-8 | H: テスト | 既知/未知分類、Severity 別アクション、ルール優先順位、承認前ルールの非適用、未知イベント集約、既存相関の回帰をテストする | `tests/test_knowledge.py`, `tests/test_api*.py` | ✅ |
+
+### 実装順序と判断基準
+
+1. 11-1〜11-3 を実装し、既知/未知を安全に識別する。この時点では既存のインシデント生成ロジックを変更しない。
+2. 11-4 で `retain_only` を推論・通知から除外し、`correlate_only` は通知せず既存インシデントへの証跡として保持する。`page_immediately` は既存の通知経路を優先度付きで利用する。
+3. 11-5〜11-6 で未知イベントを可視化し、人の承認を経て YAML の `approved` ルールへ昇格する。LLM/RAG の提案だけで自動承認しない。
+4. 11-7 は変更監査を必須にし、知識の誤適用が障害対応を妨げた場合に即時停止できるようにする。
+
+### API 案
+
+| メソッド | パス | 説明 |
+|---|---|---|
+| `GET` | `/knowledge/rules` | 承認済み・保留・無効の SKB ルールを一覧する |
+| `POST` | `/knowledge/rules` | 新規ルールを保留状態で登録する |
+| `POST` | `/knowledge/rules/{id}/approve` | レビュー済みルールを承認し、照合対象にする |
+| `POST` | `/knowledge/rules/{id}/disable` | ルールを即時無効化する |
+| `GET` | `/knowledge/unknown-events` | 未知シグネチャを発生件数・Severity・最終観測時刻で一覧する |
+| `GET` | `/knowledge/unknown-events/{signature}/suggestions` | RAG による類似インシデント・ルール候補を取得する |
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| 承認済み `%LINK-*-UPDOWN` を受信する | `knowledge_status=known` となり、対応する相関ロールと runbook が付与される |
+| 同一イベント種別で Severity 3 と 6 を受信する | Severity 3 はインシデント候補、6 は `retain_only` として保存のみになる |
+| 未登録の高 Severity メッセージを受信する | `knowledge_status=unknown` として未知イベントに集約され、要レビューのインシデント候補になる |
+| 未登録の低 Severity メッセージを繰り返し受信する | 通知せず未知イベントの頻度・Severity 分布を更新する |
+| 保留または無効状態のルールに一致する | 自動ポリシーは適用せず未知イベントとして扱う |
+| 類似する過去インシデントが存在する | レビュー画面/APIで候補として提示するが、自動承認はしない |
+| SKB が未設定または読込不能である | 既存のパース・相関・通知フローを継続し、エラーを記録する |
+
+### 完了条件
+
+- [x] 既知 SYSLOG に承認済みの分類、Severity ポリシー、相関ロール、runbook を付与できる
+- [x] 正規化シグネチャにより、可変値や Severity が異なる同種イベントを同じ知識へ対応付けられる
+- [x] Severity ごとに通知、インシデント化、相関のみ、保存のみを切り替えられる
+- [x] 未知 SYSLOG を既知ルールとして誤適用せず、発生状況を永続的に集約できる
+- [x] 未知の高 Severity イベントを要レビューとして追跡できる
+- [x] RAG は類似候補の提示に限定され、運用者の承認なしにルールを自動有効化しない
+- [x] ルールの承認・無効化・適用履歴を監査できる
+- [x] SKB 未設定時に既存の即時推論・インシデント統合が回帰しない
+- [x] `pytest -q src/tests/test_knowledge.py src/tests/test_api.py src/tests/test_api_ingest.py` がパスする（41 passed）

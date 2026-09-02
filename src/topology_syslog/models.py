@@ -14,6 +14,24 @@ class SyslogMessage:
     message: str
     event_type: str | None = None  # Cisco IOS "%FAC-SEV-MNEM" など
     is_recovery: bool = False      # リンクアップ等の復旧イベント
+    vendor: str | None = None
+    normalized_signature: str | None = None
+    knowledge_status: str = "unknown"  # "known" | "unknown"
+    knowledge_id: str | None = None
+    recommended_action: str | None = None
+    knowledge_confidence: float | None = None
+
+
+@dataclass
+class UnknownEvent:
+    signature: str
+    vendor: str | None
+    first_seen: datetime
+    last_seen: datetime
+    occurrence_count: int = 1
+    severity_counts: dict[str, int] = field(default_factory=dict)
+    nodes: list[str] = field(default_factory=list)
+    representative_message: str = ""
 
 
 @dataclass

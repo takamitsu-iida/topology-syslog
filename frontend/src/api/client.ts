@@ -1,4 +1,4 @@
-import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, SimilarIncidentsResponse, TopologyGraphResponse } from '../types'
+import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
 
 /** 開発時は vite.config.ts の proxy が /incidents, /topology, /ws を localhost:8080 へ転送する */
 const BASE = ''
@@ -15,8 +15,12 @@ async function put<T>(path: string): Promise<T> {
   return resp.json() as Promise<T>
 }
 
-async function post<T>(path: string): Promise<T> {
-  const resp = await fetch(`${BASE}${path}`, { method: 'POST' })
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const resp = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
   return resp.json() as Promise<T>
 }
@@ -55,3 +59,21 @@ export const startInvestigation = (id: string): Promise<{ incident_id: string; s
 
 export const getInvestigation = (id: string): Promise<InvestigationReport> =>
   get<InvestigationReport>(`/incidents/${encodeURIComponent(id)}/investigation`)
+
+export const listUnknownEvents = (): Promise<UnknownEventListResponse> =>
+  get<UnknownEventListResponse>('/knowledge/unknown-events')
+
+export const getUnknownEventSuggestions = (signature: string): Promise<SimilarIncidentsResponse> =>
+  get<SimilarIncidentsResponse>(`/knowledge/unknown-events/${encodeURIComponent(signature)}/suggestions`)
+
+export const listKnowledgeRules = (): Promise<KnowledgeRule[]> =>
+  get<KnowledgeRule[]>('/knowledge/rules')
+
+export const createKnowledgeRule = (rule: KnowledgeRuleInput): Promise<KnowledgeRule> =>
+  post<KnowledgeRule>('/knowledge/rules', rule)
+
+export const approveKnowledgeRule = (ruleId: string): Promise<KnowledgeRule> =>
+  post<KnowledgeRule>(`/knowledge/rules/${encodeURIComponent(ruleId)}/approve`)
+
+export const disableKnowledgeRule = (ruleId: string): Promise<KnowledgeRule> =>
+  post<KnowledgeRule>(`/knowledge/rules/${encodeURIComponent(ruleId)}/disable`)

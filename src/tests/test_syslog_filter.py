@@ -8,7 +8,7 @@ from topology_syslog.ingestion.syslog_filter import DEFAULT_PATTERNS, SyslogFilt
 from topology_syslog.models import SyslogMessage
 
 _IGNORE_FILE = str(
-    Path(__file__).parent.parent.parent / "configs" / "clos" / "syslog_ignore.txt"
+    Path(__file__).parent.parent.parent / "configs" / "syslog_ignore.txt"
 )
 
 
@@ -25,9 +25,9 @@ def _msg(message: str) -> SyslogMessage:
 
 # ---- デフォルトパターン ---------------------------------------------------
 
-def test_default_pattern_is_ignored():
+def test_default_filter_does_not_ignore_legacy_pattern():
     f = SyslogFilter()
-    assert f.is_ignored(_msg("Interface: %LINK-2-INTVULN: Gi0/0"))
+    assert not f.is_ignored(_msg("Interface: %LINK-2-INTVULN: Gi0/0"))
 
 
 def test_default_pattern_not_in_list_when_disabled():
@@ -54,11 +54,9 @@ def test_empty_filter_only_defaults():
 
 # ---- ファイル読み込み ---------------------------------------------------
 
-def test_from_file_loads_patterns():
+def test_from_file_loads_migrated_file_without_patterns():
     f = SyslogFilter.from_file(_IGNORE_FILE)
-    # ファイルに記載されたパターンが含まれること
-    assert "%SYS-5-CONFIG_I" in f.patterns
-    assert "%SYS-5-LOG_CONFIG_CHANGE" in f.patterns
+    assert f.patterns == []
 
 
 def test_from_file_skips_comments_and_blank_lines():
@@ -67,17 +65,6 @@ def test_from_file_skips_comments_and_blank_lines():
     for p in f.patterns:
         assert not p.startswith("#")
         assert p.strip() != ""
-
-
-def test_from_file_is_ignored_for_file_pattern():
-    f = SyslogFilter.from_file(_IGNORE_FILE)
-    assert f.is_ignored(_msg("terminal: %SYS-5-CONFIG_I: Configured from console"))
-    assert f.is_ignored(_msg("log: %SYS-5-LOG_CONFIG_CHANGE"))
-
-
-def test_from_file_does_not_ignore_non_matching():
-    f = SyslogFilter.from_file(_IGNORE_FILE)
-    assert not f.is_ignored(_msg("%LINK-3-UPDOWN: Interface GE0/0 down"))
 
 
 # ---- API 経由のフィルター統合テスト ---------------------------------------

@@ -25,3 +25,68 @@ class IncidentOut(BaseModel):
 class IncidentListOut(BaseModel):
     incidents: list[IncidentOut]
     total: int
+
+
+class UnknownEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    signature: str
+    vendor: str | None = None
+    first_seen: datetime
+    last_seen: datetime
+    occurrence_count: int
+    severity_counts: dict[str, int]
+    nodes: list[str]
+    representative_message: str
+
+
+class UnknownEventListOut(BaseModel):
+    events: list[UnknownEventOut]
+    total: int
+
+
+class KnowledgeRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_id: str
+    signature: str
+    description: str | None = None
+    vendor: str | None = None
+    classification: str | None = None
+    correlation_role: str | None = None
+    severity_policy: dict[str, str]
+    dedup_window_sec: int | None = None
+    runbook: tuple[str, ...]
+    status: str
+    confidence: float | None = None
+    priority: int
+
+
+class KnowledgeRuleCreate(BaseModel):
+    rule_id: str
+    signature: str
+    description: str | None = None
+    vendor: str | None = None
+    classification: str | None = None
+    correlation_role: str | None = None
+    severity_policy: dict[str, str] = {}
+    dedup_window_sec: int | None = None
+    runbook: list[str] = []
+    confidence: float | None = None
+    priority: int = 0
+
+
+class SimilarKnowledgeOut(BaseModel):
+    incidents: list[IncidentOut]
+    source: str
+
+
+class KnowledgeAuditOut(BaseModel):
+    event_id: int
+    occurred_at: datetime
+    event_type: str
+    rule_id: str | None = None
+    rule_version: int | None = None
+    actor: str | None = None
+    signature: str | None = None
+    details: dict

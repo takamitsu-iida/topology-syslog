@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from topology_syslog.models import SyslogMessage
 
-# 無設定でも除外するデフォルトパターン
-DEFAULT_PATTERNS: list[str] = ["%LINK-2-INTVULN"]
+# 旧 SYSLOG_IGNORE_FILE の互換用。標準の無視ルールは SKB に移行済み。
+DEFAULT_PATTERNS: list[str] = []
 
 # RFC 5424 severity 名 → 数値 (0=Emergency, 7=Debug)
 SEVERITY_NAMES: dict[str, int] = {
