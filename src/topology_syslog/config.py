@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass, field
 
 import yaml
@@ -15,6 +16,7 @@ class SyslogConfig:
 
 @dataclass
 class CorrelationConfig:
+    mode: str = "immediate"
     window_sec: int = 30
     max_buffer_size: int = 100_000
 
@@ -66,8 +68,21 @@ def _apply(cfg: AppConfig, raw: dict) -> None:
         cfg.syslog.listen_port = s.get("listen_port", cfg.syslog.listen_port)
         cfg.syslog.protocol = s.get("protocol", cfg.syslog.protocol)
     if c := raw.get("correlation"):
+        cfg.correlation.mode = c.get("mode", cfg.correlation.mode)
         cfg.correlation.window_sec = c.get("window_sec", cfg.correlation.window_sec)
         cfg.correlation.max_buffer_size = c.get("max_buffer_size", cfg.correlation.max_buffer_size)
+        legacy_keys = [
+            key for key in ("window_sec", "burst_window_sec", "burst_threshold", "window_extend_factor", "window_sec_max")
+            if key in c
+        ]
+        if legacy_keys:
+            warnings.warn(
+                "Legacy correlation window settings are deprecated and ignored in immediate mode; "
+                "use 'correlation.mode: immediate' instead. "
+                f"Deprecated keys: {legacy_keys}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
     if t := raw.get("topology"):
         cfg.topology.source = t.get("source", cfg.topology.source)
         cfg.topology.path = t.get("path", cfg.topology.path)

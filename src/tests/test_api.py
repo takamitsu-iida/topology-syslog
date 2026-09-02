@@ -1,6 +1,12 @@
+import asyncio
 from datetime import datetime, timezone
 
-from topology_syslog.models import Incident
+import pytest
+from fastapi.testclient import TestClient
+
+from topology_syslog.api.main import _process_message_immediately, create_app
+from topology_syslog.config import load_config
+from topology_syslog.models import Incident, SyslogMessage
 
 
 def _make_inc(
@@ -74,6 +80,75 @@ def test_resolve_incident(client, app):
 def test_resolve_incident_not_found(client):
     resp = client.put("/incidents/INC-99991231-999/resolve")
     assert resp.status_code == 404
+
+
+def test_process_message_immediately_merges_into_open_incident(app):
+    with TestClient(app) as client:
+        existing = Incident(
+            incident_id="INC-20260816-001",
+            created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+            root_cause_node="Dist-Switch1",
+            primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
+            secondary_nodes=["Access-SW1"],
+            raw_log_count=1,
+            raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
+            status="OPEN",
+        )
+        app.state.store.save(existing)
+        msg = SyslogMessage(
+            received_at=datetime(2026, 8, 16, 10, 1, 0, tzinfo=timezone.utc),
+            source_ip="10.0.0.1",
+            hostname="Core-Router1",
+            facility=3,
+            severity=5,
+            message="%LINK-3-UPDOWN: Interface GE0/1 down",
+        )
+
+        class DummyNotifier:
+            def __init__(self):
+                self.calls = []
+            def send(self, incident):
+                self.calls.append(incident.incident_id)
+            def resolve_by_source(self, node):
+                return None
+
+        app.state.vigil_notifier = DummyNotifier()
+        with client.websocket_connect("/ws/incidents") as ws:
+            asyncio.run(_process_message_immediately(app, msg))
+            msg_json = ws.receive_json()
+            assert msg_json["type"] == "incident.updated"
+            assert msg_json["incident"]["root_cause_node"] == "Core-Router1"
+            assert app.state.vigil_notifier.calls == []
+
+        incidents = app.state.store.list_open_active()
+        assert len(incidents) == 1
+        assert incidents[0].incident_id == "INC-20260816-001"
+        assert incidents[0].root_cause_node == "Core-Router1"
+        assert incidents[0].raw_log_count >= 2
+
+
+def test_create_app_accepts_time_window_compatibility_mode(tmp_path):
+    cfg_path = tmp_path / "topology.yaml"
+    cfg_path.write_text("topology:\n  path: configs/clos/yang_topology.yaml\n", encoding="utf-8")
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path=str(cfg_path),
+        topology_source="iida-yaml",
+        correlation_mode="time_window",
+        window_sec=10,
+    )
+    assert app is not None
+    assert app.state is not None
+
+
+def test_load_config_warns_on_legacy_window_settings(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "correlation:\n  window_sec: 30\n",
+        encoding="utf-8",
+    )
+    with pytest.warns(DeprecationWarning, match="Legacy correlation window settings"):
+        load_config(str(cfg_path))
 
 
 # ---- /topology/nodes ---------------------------------------------------

@@ -40,6 +40,21 @@ def _run_ingest(args: argparse.Namespace) -> None:
     from topology_syslog.topology.graph_engine import GraphEngine
     from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
+    correlation_mode = os.getenv("CORRELATION_MODE", "immediate").lower()
+    if correlation_mode not in {"immediate", "time_window"}:
+        raise ValueError("CORRELATION_MODE must be one of: immediate, time_window")
+
+    legacy_keys = [
+        key for key in ("WINDOW_SEC", "BURST_WINDOW_SEC", "BURST_THRESHOLD", "WINDOW_EXTEND_FACTOR", "WINDOW_SEC_MAX")
+        if os.getenv(key) is not None
+    ]
+    if legacy_keys:
+        logging.getLogger(__name__).warning(
+            "Legacy window settings (%s) are deprecated in immediate mode and ignored. "
+            "Use CORRELATION_MODE=immediate instead.",
+            ", ".join(legacy_keys),
+        )
+
     topology_path = args.topology or os.getenv("TOPOLOGY_PATH")
     if not topology_path:
         print(
@@ -174,6 +189,10 @@ def main() -> None:
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
     )
 
+    correlation_mode = os.getenv("CORRELATION_MODE", "immediate").lower()
+    if correlation_mode not in {"immediate", "time_window"}:
+        raise ValueError("CORRELATION_MODE must be one of: immediate, time_window")
+
     if args.ingest is not None:
         _run_ingest(args)
         return
@@ -192,6 +211,7 @@ def main() -> None:
         cors_origins=cors_origins,
         syslog_host=os.getenv("SYSLOG_HOST", "0.0.0.0"),
         syslog_port=int(os.getenv("SYSLOG_PORT", "1514")),
+        correlation_mode=correlation_mode,
         window_sec=int(os.getenv("WINDOW_SEC", "30")),
         burst_window_sec=float(os.getenv("BURST_WINDOW_SEC", "5.0")),
         burst_threshold=int(os.getenv("BURST_THRESHOLD", "3")),

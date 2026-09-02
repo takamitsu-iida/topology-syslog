@@ -102,6 +102,25 @@ class IncidentStore:
             session.merge(_to_row(incident))
             session.commit()
 
+    def update(self, incident: Incident) -> bool:
+        """既存インシデントを更新する。存在しない ID は作成しない。"""
+        with Session(self._engine) as session:
+            row = session.get(_IncidentRow, incident.incident_id)
+            if row is None:
+                return False
+            row.created_at = incident.created_at.replace(tzinfo=None)
+            row.root_cause = incident.root_cause_node
+            row.primary_event = incident.primary_event
+            row.secondary_nodes = incident.secondary_nodes
+            row.raw_log_count = incident.raw_log_count
+            row.raw_logs = incident.raw_logs[:_RAW_LOGS_CAP]
+            row.status = incident.status
+            row.condition = incident.condition
+            row.recurrence_count = incident.recurrence_count
+            row.maintenance_plan_id = incident.maintenance_plan_id
+            session.commit()
+            return True
+
     def get_by_id(self, incident_id: str) -> Incident | None:
         with Session(self._engine) as session:
             row = session.get(_IncidentRow, incident_id)
@@ -126,6 +145,17 @@ class IncidentStore:
                 stmt = stmt.where(_IncidentRow.created_at <= to_dt.replace(tzinfo=None))
             stmt = stmt.order_by(desc(_IncidentRow.created_at))
             return [_from_row(r) for r in session.scalars(stmt).all()]
+
+    def list_open_active(self) -> list[Incident]:
+        """即時推論の統合候補になる OPEN かつ未復旧のインシデントを返す。"""
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.status == "OPEN")
+                .where(_IncidentRow.condition.in_(["ACTIVE", "FLAPPING"]))
+                .order_by(desc(_IncidentRow.created_at))
+            ).all()
+            return [_from_row(r) for r in rows]
 
     def resolve(self, incident_id: str) -> bool:
         """オペレーターによるインシデントのクローズ（status = CLOSED）。"""

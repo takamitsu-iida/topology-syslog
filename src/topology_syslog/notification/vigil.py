@@ -25,8 +25,15 @@ class VigilNotifier(BaseNotifier):
         self._team_name = team_name
         self._default_priority = default_priority
         self._timeout = timeout
+        self._sent_alerts: set[str] = set()
 
     def send(self, incident: Incident) -> None:
+        fingerprint = f"{incident.incident_id}:{incident.root_cause_node}:{incident.primary_event}"
+        if fingerprint in self._sent_alerts:
+            _logger.debug("Skip duplicate vigil alert for %s", fingerprint)
+            return
+        self._sent_alerts.add(fingerprint)
+
         affected = ", ".join(incident.secondary_nodes) if incident.secondary_nodes else "なし"
         description = f"影響ノード: {affected} / ログ件数: {incident.raw_log_count}"
         if incident.recurrence_count:

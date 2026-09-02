@@ -20,6 +20,7 @@ from topology_syslog.api.routes.investigation import router as investigation_rou
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
+from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAction
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
@@ -53,6 +54,95 @@ def _has_routing_events(buffer: list) -> bool:
     )
 
 
+async def _process_message_immediately(app: FastAPI, msg) -> None:
+    graph = app.state.graph
+    if graph is None:
+        _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
+        return
+
+    if msg.is_recovery:
+        if not graph.node_exists(msg.hostname):
+            return
+        recovered_ids = await asyncio.to_thread(app.state.store.recover_by_root_cause, msg.hostname)
+        for rid in recovered_ids:
+            recovered_inc = await asyncio.to_thread(app.state.store.get_by_id, rid)
+            if recovered_inc:
+                _logger.info("Auto-recovered %s (root_cause=%s sent recovery event)", rid, msg.hostname)
+                await app.state.ws_manager.broadcast({
+                    "type": "incident.recovered",
+                    "incident_id": rid,
+                    "incident": IncidentOut.model_validate(recovered_inc).model_dump(mode="json"),
+                })
+        if app.state.vigil_notifier is not None:
+            try:
+                await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, msg.hostname)
+            except Exception:
+                _logger.warning("Failed to resolve vigil incidents for node %s", msg.hostname)
+        return
+
+    if app.state.maintenance_checker is not None:
+        app.state.maintenance_checker.reload_if_changed()
+
+    try:
+        incidents = app.state.inferencer.infer([msg], graph)
+    except Exception:
+        _logger.exception("Error inferring incident from single syslog message")
+        return
+
+    if not incidents:
+        return
+
+    open_incidents = await asyncio.to_thread(app.state.store.list_open_active)
+    for inc in incidents:
+        if app.state.maintenance_checker is not None:
+            plan = app.state.maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
+            if plan is not None:
+                inc.status = "CLOSED"
+                inc.maintenance_plan_id = plan.plan_id
+                _logger.info(
+                    "Auto-closed %s (root_cause=%s): matches maintenance plan %s '%s'",
+                    inc.incident_id, inc.root_cause_node,
+                    plan.plan_id, plan.title,
+                )
+
+        inc.recurrence_count = await asyncio.to_thread(app.state.store.count_by_root_cause, inc.root_cause_node)
+        decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
+
+        if decision.action == MergeAction.NEW:
+            await asyncio.to_thread(app.state.store.save, inc)
+            if app.state.vigil_notifier is not None:
+                try:
+                    await asyncio.to_thread(app.state.vigil_notifier.send, inc)
+                except Exception:
+                    _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
+            await app.state.ws_manager.broadcast({
+                "type": "incident.new",
+                "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
+            })
+            open_incidents.append(inc)
+            continue
+
+        target = decision.target
+        if target is None:
+            await asyncio.to_thread(app.state.store.save, inc)
+            continue
+
+        merged = app.state.merger.merge(target, inc, graph)
+        merged.recurrence_count = inc.recurrence_count
+        if await asyncio.to_thread(app.state.store.update, merged):
+            await app.state.ws_manager.broadcast({
+                "type": "incident.updated",
+                "incident": IncidentOut.model_validate(merged).model_dump(mode="json"),
+            })
+        else:
+            await asyncio.to_thread(app.state.store.save, merged)
+
+        for idx, existing in enumerate(open_incidents):
+            if existing.incident_id == target.incident_id:
+                open_incidents[idx] = merged
+                break
+
+
 def create_app(
     database_url: str = "sqlite:///./incidents.db",
     topology_path: str | None = None,
@@ -62,6 +152,7 @@ def create_app(
     ignore_patterns: list[str] | None = None,
     syslog_host: str = "0.0.0.0",
     syslog_port: int = 1514,
+    correlation_mode: str = "immediate",
     window_sec: int = 30,
     burst_window_sec: float = 5.0,
     burst_threshold: int = 3,
@@ -84,6 +175,8 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
         app.state.ws_manager = ConnectionManager()
+        app.state.correlation_mode = correlation_mode
+        app.state.merger = IncidentMerger()
         app.state.maintenance_checker = (
             MaintenanceChecker(maintenance_dir) if maintenance_dir else None
         )
@@ -137,117 +230,10 @@ def create_app(
             _logger.warning("Syslog UDP receiver could not start: %s", exc)
 
         async def _consume_syslog() -> None:
-            buffer: list = []
-            flush_task: asyncio.Task | None = None
-
-            async def _flush_after_delay() -> None:
-                nonlocal flush_task
-                loop = asyncio.get_event_loop()
-                start = loop.time()
-                target = float(window_sec)
-                extended = False
-
-                while loop.time() - start < target:
-                    remaining = target - (loop.time() - start)
-                    await asyncio.sleep(min(float(burst_window_sec), remaining))
-                    if not extended and (
-                        _burst_detected(buffer, burst_window_sec, burst_threshold)
-                        or _has_routing_events(buffer)
-                    ):
-                        new_target = min(window_sec * window_extend_factor, float(window_sec_max))
-                        if new_target > target:
-                            _logger.debug("Routing/burst event — window extended %.0fs → %.0fs", target, new_target)
-                            target = new_target
-                            extended = True
-
-                flush_task = None
-                if not buffer:
-                    return
-                msgs = buffer.copy()
-                buffer.clear()
-                graph = app.state.graph
-                if graph is None:
-                    _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
-                    return
-                try:
-                    # 復旧メッセージ（リンクアップ等）は推論に使わず、既存インシデントの自動解決に使う
-                    non_recovery = [m for m in msgs if not m.is_recovery]
-                    recovery_nodes = {
-                        m.hostname for m in msgs
-                        if m.is_recovery and graph.node_exists(m.hostname)
-                    }
-
-                    if app.state.maintenance_checker is not None:
-                        app.state.maintenance_checker.reload_if_changed()
-
-                    incidents = app.state.inferencer.infer(non_recovery, graph)
-                    _logger.info(
-                        "Inferred %d incident(s) from %d syslog(s) (%d recovery event(s))",
-                        len(incidents), len(non_recovery), len(msgs) - len(non_recovery),
-                    )
-
-                    now_utc = datetime.now(tz=timezone.utc)
-                    for inc in incidents:
-                        if app.state.maintenance_checker is not None:
-                            plan = app.state.maintenance_checker.find_active_plan(
-                                inc, at=now_utc, graph=graph
-                            )
-                            if plan is not None:
-                                inc.status = "CLOSED"
-                                inc.maintenance_plan_id = plan.plan_id
-                                _logger.info(
-                                    "Auto-closed %s (root_cause=%s): matches maintenance plan %s '%s'",
-                                    inc.incident_id, inc.root_cause_node,
-                                    plan.plan_id, plan.title,
-                                )
-                        # 保存前に過去の同根本原因インシデント数を記録（再発判定）
-                        inc.recurrence_count = await asyncio.to_thread(
-                            app.state.store.count_by_root_cause, inc.root_cause_node
-                        )
-                        await asyncio.to_thread(app.state.store.save, inc)
-                        if app.state.vigil_notifier is not None:
-                            try:
-                                await asyncio.to_thread(app.state.vigil_notifier.send, inc)
-                            except Exception:
-                                _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
-                        await app.state.ws_manager.broadcast({
-                            "type": "incident.new",
-                            "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
-                        })
-
-                    # 復旧ノードのconditionをRECOVEREDに更新（インシデントはOPENのまま）
-                    for node in recovery_nodes:
-                        recovered_ids = await asyncio.to_thread(
-                            app.state.store.recover_by_root_cause, node
-                        )
-                        for rid in recovered_ids:
-                            recovered_inc = await asyncio.to_thread(
-                                app.state.store.get_by_id, rid
-                            )
-                            if recovered_inc:
-                                _logger.info(
-                                    "Auto-recovered %s (root_cause=%s sent recovery event)", rid, node
-                                )
-                                await app.state.ws_manager.broadcast({
-                                    "type": "incident.recovered",
-                                    "incident_id": rid,
-                                    "incident": IncidentOut.model_validate(recovered_inc).model_dump(mode="json"),
-                                })
-                        # ローカルストアの状態に関わらず復旧イベントが来たら常に通知する
-                        if app.state.vigil_notifier is not None:
-                            try:
-                                await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, node)
-                            except Exception:
-                                _logger.warning("Failed to resolve vigil incidents for node %s", node)
-                except Exception:
-                    _logger.exception("Error processing syslog messages")
-
             while True:
                 msg = await syslog_queue.get()
                 app.state.syslog_recv_count += 1
-                buffer.append(msg)
-                if flush_task is None:
-                    flush_task = asyncio.create_task(_flush_after_delay())
+                await _process_message_immediately(app, msg)
 
         # AI コンポーネント（オプション）— chromadb / openai が未インストールでも起動可能
         app.state.report_generator = None

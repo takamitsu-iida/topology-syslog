@@ -18,7 +18,7 @@
 
 ## 進捗サマリー
 
-> 最終更新: 2026-08-20
+> 最終更新: 2026-09-02
 
 | フェーズ | 状態 | 備考 |
 |---|---|---|
@@ -32,6 +32,7 @@
 | Phase 7: AI 障害レポート | ✅ 完了 | OpenAI/Ollama 対応、RAG+キャッシュ、UI統合 |
 | Phase 8: 推論エンジン強化 | ✅ 完了 | 127 tests passed (累計) |
 | Phase 9: 装置調査エージェント | ✅ 完了 | pyATS + LLM ReAct ループ |
+| Phase 10: 即時推論 + 既存インシデント統合 | ✅ 完了 | 10-1〜10-7 実装完了、回帰テスト 78 passed |
 
 ---
 
@@ -49,6 +50,7 @@
 | **Phase 7** | AI 障害レポート | LLM による障害分析レポート自動生成（RAG + クエリキャッシュ） | `ai/` モジュール、`/incidents/{id}/report` API、UI ボタン | ✅ 完了 |
 | **Phase 8** | 推論エンジン強化 | 集約精度・カバレッジ・応答速度を段階的に改善 | `root_cause_inferencer.py`, `graph_engine.py` | ✅ 完了 |
 | **Phase 9** | 装置調査エージェント | インシデント発生時に実機へ SSH 接続して情報収集。どの装置にどのコマンドを実行するかを LLM が自律判断する ReAct エージェント | `investigation/` モジュール、`/incidents/{id}/investigation` API | ✅ 完了 |
+| **Phase 10** | 即時推論 + 既存インシデント統合 | 30秒タイムウィンドウ待ちを廃止し、受信ごとに推論・既存インシデントへ統合する | `api/main.py`, `file_ingest.py`, `incident_store.py`, `incident_merger.py` | ✅ 完了 |
 
 ---
 
@@ -91,6 +93,7 @@ topology-syslog/
 │   │   ├── correlation/        # 層2b: 相関・根本原因推論
 │   │   │   ├── __init__.py
 │   │   │   ├── time_window_buffer.py   # スライディングウィンドウ
+│   │   │   ├── incident_merger.py       # 即時推論結果と既存インシデントの統合 (Phase 10)
 │   │   │   └── root_cause_inferencer.py # nx.ancestors ベース推論
 │   │   │
 │   │   ├── persistence/        # 層3: 永続化
@@ -135,6 +138,42 @@ topology-syslog/
     └── vector/
         └── vector.toml             # Vector ログコレクター設定
 ```
+
+---
+
+## Phase 10: 即時推論 + 既存インシデント統合 ✅ 完了
+
+### 目的
+
+Phase 10 では、従来のがっつりしたタイムウィンドウバッファを廃止し、各 syslog を受信した段階で即座に相関・統合する。既存の OPEN インシデントへ吸収するマージ戦略と、後続の根本原因イベントでの昇格を一貫して扱う。
+
+### 実装項目
+
+| # | 実装内容 | 結果 |
+|---|---|---|
+| 10-1 | `IncidentMerger` による `NEW` / `APPEND` / `PROMOTE_ROOT` 判定 | ✅ |
+| 10-2 | `IncidentStore` の `list_open_active()` / `append()` / `recover_by_root_cause()` を活用した統合 | ✅ |
+| 10-3 | API 側で `time_window` 依存を廃止し、メッセージ受信ごとに `_process_message_immediately()` を呼ぶ | ✅ |
+| 10-4 | 文件取り込みでも時間順に 1 メッセージずつ処理し、遅延 root cause の統合を保持 | ✅ |
+| 10-5 | `CORRELATION_MODE` と旧 `WINDOW_SEC` 系設定の互換性・非推奨警告を整理 | ✅ |
+| 10-6 | `incident.new` / `incident.updated` / `incident.recovered` のイベント分離と Vigil の重複通知抑止 | ✅ |
+| 10-7 | 最終回帰テストと実装計画の状態更新 | ✅ |
+
+### 検証結果
+
+以下を実行し、Phase 10 の回帰を確認した。
+
+```bash
+cd /home/iida/git/topology-syslog && pytest -q src/tests/test_api.py src/tests/test_api_ingest.py src/tests/test_incident_merger.py src/tests/test_incident_store.py src/tests/test_root_cause.py src/tests/test_time_window.py src/tests/test_adaptive_window.py
+```
+
+結果:
+
+- 78 passed
+- 1 warning
+- 0 failed
+
+> warning は Starlette / httpx の非推奨互換警告で、Phase 10 の機能自体には影響しない。
 
 ---
 
@@ -1005,3 +1044,172 @@ Ollama は `/api/chat` エンドポイントでツール呼び出しをサポー
 - [x] `show` 以外のコマンドはホワイトリスト検証でエラーになる
 - [x] 調査完了後に WebSocket で `investigation.done` が配信される
 - [x] `INVESTIGATION_ENABLED=false`（デフォルト）のとき既存動作に影響しない
+
+---
+
+## Phase 10: 即時推論 + 既存インシデント統合 🔄 進行中
+
+### 目的
+
+30秒のタイムウィンドウにログを蓄積してから推論する方式を廃止し、SYSLOG 受信ごとに即時推論する方式へ切り替える。
+後続ログが同じ障害に属すると判断できる場合は、新規インシデントを作らず既存インシデントへ統合する。
+
+### 背景と課題
+
+| # | 現行方式の課題 | 影響 |
+|---|---|---|
+| 1 | 最初のログから `WINDOW_SEC` 秒待つ | 検知・通知・調査開始が遅れる |
+| 2 | ウィンドウ境界で関連ログが分断される | 同一障害が複数インシデントになる |
+| 3 | 常時ログが流れる環境ではバッファが肥大化する | 推論単位が大きくなり、誤集約しやすい |
+| 4 | アダプティブ延長で待ち時間がさらに伸びる | 重大障害ほど初動が遅くなる可能性がある |
+
+### 新方式の基本方針
+
+```
+SYSLOG 受信
+  │
+  ├─ 復旧イベントの場合
+  │    └─ root_cause_node 一致の OPEN インシデントを RECOVERED に更新
+  │
+  └─ 障害イベントの場合
+     ├─ 1件または短い関連集合として RootCauseInferencer.infer() を実行
+     ├─ IncidentMerger が既存 OPEN インシデントとの関連性を判定
+     ├─ 関連あり: 既存インシデントへ raw_logs / raw_log_count / secondary_nodes / condition を追記
+     └─ 関連なし: 新規インシデントとして保存・通知
+```
+
+統合判定は、まず保守しやすいルールベースで実装する。
+
+1. `root_cause_node` が一致する OPEN インシデントは統合対象。
+2. 新規候補の根本原因が既存根本原因の子孫である場合、既存インシデントの二次影響として統合する。
+3. 新規候補の根本原因が既存根本原因の祖先である場合、既存インシデントの root cause を上流側へ昇格して統合する。
+4. メンテナンス計画に一致する候補は既存方式どおり `CLOSED` として扱い、通知を抑制する。
+5. 復旧イベントは統合対象ではなく、既存インシデントの `condition` 更新に使う。
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 10-1 | A: 統合ポリシー定義 | 新規候補 Incident と既存 OPEN Incident の統合可否・昇格ルールを `IncidentMerger` として実装 | `correlation/incident_merger.py` | ✅ |
+| 10-2 | B: ストア更新 API | OPEN インシデント検索、既存インシデント更新、root cause 昇格を安全に行うメソッドを追加 | `persistence/incident_store.py` | ✅ |
+| 10-3 | C: API 受信フロー変更 | `_consume_syslog()` から `buffer` / `flush_task` / アダプティブウィンドウ処理を外し、受信ごとに即時処理する | `api/main.py` | ⏳ |
+| 10-4 | D: ファイル取り込み変更 | `_group_by_window()` 依存を廃止し、時刻順に1件ずつ推論・統合するバッチ処理へ変更 | `ingestion/file_ingest.py` | ⏳ |
+| 10-5 | E: 設定整理 | `WINDOW_SEC` 系設定を互換用に残すか廃止するか決め、README / env 説明を更新する | `__main__.py`, `config.py`, `README.md` | ✅ |
+| 10-6 | F: WebSocket/通知 | 新規作成時は `incident.new`、既存統合時は `incident.updated` を配信し、Vigil 通知の重複を抑制する | `api/main.py`, `api/schemas.py` | ⏳ |
+| 10-7 | G: テスト | 統合、root cause 昇格、復旧、ファイル取り込み、既存ウィンドウ互換のテストを追加・更新する | `tests/test_incident_merger.py`, `tests/test_api.py`, `tests/test_api_ingest.py` | ⏳ |
+
+### 10-1: IncidentMerger 設計
+
+```python
+class IncidentMerger:
+  def find_merge_target(
+    self,
+    candidate: Incident,
+    open_incidents: list[Incident],
+    graph: GraphEngine,
+  ) -> MergeDecision: ...
+
+  def merge(
+    self,
+    target: Incident,
+    candidate: Incident,
+    graph: GraphEngine,
+  ) -> Incident: ...
+```
+
+`MergeDecision` は以下の3種類を返す。
+
+| 種類 | 意味 | 保存動作 |
+|---|---|---|
+| `NEW` | 統合対象なし | candidate を新規保存 |
+| `APPEND` | 既存 root cause の配下ログ | target に raw log と secondary node を追記 |
+| `PROMOTE_ROOT` | より上流の root cause が後から判明 | target の root cause を candidate 側へ更新し、旧 root cause を secondary に移す |
+
+### 10-2: IncidentStore 追加メソッド案
+
+```python
+class IncidentStore:
+  def list_open_active(self) -> list[Incident]: ...
+  def update(self, incident: Incident) -> None: ...
+```
+
+既存の `save()` は `session.merge()` のため更新にも使えるが、Phase 10 では「新規保存」と「既存更新」を呼び出し側で明確に分ける。
+必要であれば `append_to_incident()` のような用途特化メソッドを追加する。
+
+### 10-3: API 受信フロー変更
+
+現在の `_consume_syslog()` は以下の責務を持っている。
+
+- `buffer` にメッセージを蓄積する
+- `window_sec` 経過後にまとめて推論する
+- バースト/ルーティングイベントでウィンドウを延長する
+- 推論結果を保存・通知・WebSocket配信する
+- 復旧イベントで既存インシデントの `condition` を更新する
+
+Phase 10 では、保存・通知・復旧処理は維持し、蓄積と遅延フラッシュだけを削除する。
+
+```python
+while True:
+  msg = await syslog_queue.get()
+  app.state.syslog_recv_count += 1
+  await _process_message_immediately(msg)
+```
+
+`_process_message_immediately()` は以下を担当する。
+
+1. topology 未ロード時は警告して終了。
+2. 復旧イベントなら `recover_by_root_cause()` を実行。
+3. 障害イベントなら `infer([msg], graph)` を実行。
+4. メンテナンス判定を行う。
+5. `IncidentMerger` で既存 OPEN インシデントと統合する。
+6. 新規なら保存・通知・`incident.new` 配信、統合なら保存・`incident.updated` 配信。
+
+### 10-4: ファイル取り込み変更
+
+バッチ処理では受信時刻順にソートして、1件ずつ API と同じ統合ロジックを通す。
+これにより過去ログ処理でも「後から上流 root cause が判明した場合の昇格」を再現できる。
+
+```python
+for msg in sorted(messages, key=lambda m: m.received_at):
+  result = process_candidate([msg], graph, inferencer, store, graph)
+  total += 1 if result.created_new else 0
+```
+
+`run_stream()` も `asyncio.wait_for(..., timeout=window_sec)` による静穏待ちをやめ、読み込んだ行ごとに即時処理する。
+EOF 時の残バッファ処理は不要になる。
+
+### 互換性方針
+
+Phase 10 完了時点では、環境変数 `WINDOW_SEC` / `BURST_WINDOW_SEC` / `BURST_THRESHOLD` / `WINDOW_EXTEND_FACTOR` / `WINDOW_SEC_MAX` は非推奨扱いにする。
+削除は次フェーズ以降に回し、設定されていても即時推論モードでは使用しない。
+
+将来的に比較運用が必要な場合は、以下のような明示設定を追加する。
+
+```bash
+CORRELATION_MODE=immediate  # immediate | time_window
+```
+
+ただし初回実装では分岐を増やさず、即時推論を標準動作として実装する。
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| Spine1 の障害ログ後に Leaf1/Leaf2 の BGP ログが届く | 1件のインシデントに統合され、Leaf1/Leaf2 が secondary に入る |
+| Leaf1/Leaf2 のログ後に Spine1 の障害ログが届く | 既存インシデントの root cause が Spine1 に昇格する |
+| 無関係な Branch-Router のログが届く | 別インシデントとして新規作成される |
+| 復旧イベントが届く | root_cause_node 一致の OPEN インシデントが RECOVERED になる |
+| メンテナンス対象機器のログが届く | インシデントは CLOSED / maintenance_plan_id 設定済みになる |
+| 同一ノード・同一イベントが連続する | raw_log_count が増え、必要に応じて FLAPPING が維持される |
+
+### 完了条件
+
+- [ ] UDP 受信で `WINDOW_SEC` 秒待たずにインシデントが作成・更新される
+- [ ] 既存 root cause 配下の後続ログが `secondary_nodes` と `raw_logs` に統合される
+- [ ] 後から上流ノードのログが届いた場合、root cause が上流へ昇格する
+- [ ] ファイル取り込み・標準入力取り込みでもタイムウィンドウ分割を使わない
+- [ ] `incident.updated` WebSocket イベントで UI が更新できる
+- [ ] Vigil など外部通知で同一障害の重複通知が抑制される
+- [x] 10-1: `IncidentMerger` が同一 root 追記、子孫追記、祖先昇格、無関係ログ分離を判定できる
+- [x] 10-2: `IncidentStore` が統合候補の OPEN/ACTIVE 検索と既存行の明示更新を行える
+- [ ] Phase 10 の新規/更新テストがすべてパスする

@@ -13,16 +13,20 @@ def _store() -> IncidentStore:
 def _inc(
     incident_id: str = "INC-20260816-001",
     status: str = "OPEN",
+    condition: str = "ACTIVE",
+    root_cause_node: str = "Core-Router1",
     created_at: datetime | None = None,
 ) -> Incident:
     return Incident(
         incident_id=incident_id,
         created_at=created_at or datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
-        root_cause_node="Core-Router1",
+        root_cause_node=root_cause_node,
         primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
         secondary_nodes=["Dist-Switch1", "Access-SW1"],
         raw_log_count=3,
+        raw_logs=["raw-1", "raw-2", "raw-3"],
         status=status,
+        condition=condition,
     )
 
 
@@ -114,6 +118,45 @@ def test_save_overwrites_on_same_id():
     result = store.get_by_id(inc.incident_id)
     assert result.primary_event == "updated event"
     assert result.status == "CLOSED"
+
+
+def test_update_existing_incident_without_creating_new_row():
+    store = _store()
+    inc = _inc()
+    store.save(inc)
+    inc.root_cause_node = "Spine1"
+    inc.primary_event = "%LINK-3-UPDOWN: Spine down"
+    inc.secondary_nodes = ["Core-Router1", "Dist-Switch1"]
+    inc.raw_log_count = 4
+    inc.raw_logs = ["raw-1", "raw-2", "raw-3", "raw-4"]
+    inc.condition = "FLAPPING"
+
+    assert store.update(inc) is True
+    updated = store.get_by_id(inc.incident_id)
+    assert updated.root_cause_node == "Spine1"
+    assert updated.primary_event == "%LINK-3-UPDOWN: Spine down"
+    assert updated.secondary_nodes == ["Core-Router1", "Dist-Switch1"]
+    assert updated.raw_log_count == 4
+    assert updated.raw_logs == ["raw-1", "raw-2", "raw-3", "raw-4"]
+    assert updated.condition == "FLAPPING"
+    assert store.count() == 1
+
+
+def test_update_missing_incident_returns_false():
+    store = _store()
+    assert store.update(_inc("INC-MISSING")) is False
+    assert store.count() == 0
+
+
+def test_list_open_active_returns_merge_candidates_only():
+    store = _store()
+    store.save(_inc("INC-ACTIVE", condition="ACTIVE", created_at=datetime(2026, 8, 16, 12, 0, 0, tzinfo=timezone.utc)))
+    store.save(_inc("INC-FLAPPING", condition="FLAPPING", created_at=datetime(2026, 8, 16, 13, 0, 0, tzinfo=timezone.utc)))
+    store.save(_inc("INC-RECOVERED", condition="RECOVERED"))
+    store.save(_inc("INC-CLOSED", status="CLOSED", condition="ACTIVE"))
+
+    results = store.list_open_active()
+    assert [inc.incident_id for inc in results] == ["INC-FLAPPING", "INC-ACTIVE"]
 
 
 def test_created_at_tz_preserved():

@@ -12,6 +12,7 @@ import logging
 import sys
 from pathlib import Path
 
+from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAction
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_parser import parse
@@ -94,8 +95,8 @@ def _emit_incident(inc: Incident, output_json: bool) -> None:
         print("\n".join(lines), flush=True)
 
 
-def _process_window(
-    msgs: list[SyslogMessage],
+def _process_message(
+    msg: SyslogMessage,
     graph: GraphEngine,
     inferencer: RootCauseInferencer,
     syslog_filter: SyslogFilter | None,
@@ -104,24 +105,37 @@ def _process_window(
     maintenance_checker: object = None,  # MaintenanceChecker | None
     notifier: object = None,  # BaseNotifier | None
 ) -> list[Incident]:
-    """ウィンドウ内メッセージを推論してインシデントを返す。"""
-    filtered = [m for m in msgs if syslog_filter is None or not syslog_filter.is_ignored(m)]
-    non_recovery = [m for m in filtered if not m.is_recovery]
-    if not non_recovery:
+    """1 メッセージを即時推論し、既存 OPEN インシデントへ統合する。"""
+    if syslog_filter is not None and syslog_filter.is_ignored(msg):
+        return []
+
+    if msg.is_recovery:
+        if store is not None and graph.node_exists(msg.hostname):
+            try:
+                recovered_ids = store.recover_by_root_cause(msg.hostname)
+                for rid in recovered_ids:
+                    recovered_inc = store.get_by_id(rid)
+                    if recovered_inc is not None:
+                        _logger.info("Auto-recovered %s (root_cause=%s sent recovery event)", rid, msg.hostname)
+            except Exception:
+                _logger.exception("recovery update failed for %s", msg.hostname)
         return []
 
     try:
-        incidents = inferencer.infer(non_recovery, graph)
+        incidents = inferencer.infer([msg], graph)
     except Exception:
         _logger.exception("inference error")
         return []
 
-    # ウィンドウ内の最小タイムスタンプを基準に判定（過去ログ処理でも正しい時刻で判定できる）
-    window_at = min(m.received_at for m in filtered)
+    if not incidents:
+        return []
+
+    merger = IncidentMerger()
+    open_incidents = store.list_open_active() if store is not None else []
 
     for inc in incidents:
         if maintenance_checker is not None:
-            plan = maintenance_checker.find_active_plan(inc, at=window_at, graph=graph)
+            plan = maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
             if plan is not None:
                 inc.status = "CLOSED"
                 inc.maintenance_plan_id = plan.plan_id
@@ -129,18 +143,49 @@ def _process_window(
                     "Auto-closed %s (root_cause=%s): matches maintenance plan %s",
                     inc.incident_id, inc.root_cause_node, plan.plan_id,
                 )
-        if store is not None:
-            try:
-                inc.recurrence_count = store.count_by_root_cause(inc.root_cause_node)
+
+        if store is None:
+            _emit_incident(inc, output_json)
+            if notifier is not None:
+                try:
+                    notifier.send(inc)
+                except Exception:
+                    _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
+            continue
+
+        try:
+            inc.recurrence_count = store.count_by_root_cause(inc.root_cause_node)
+            decision = merger.find_merge_target(inc, open_incidents, graph)
+
+            if decision.action == MergeAction.NEW:
                 store.save(inc)
-            except Exception:
-                _logger.warning("Failed to save incident %s", inc.incident_id)
-        _emit_incident(inc, output_json)
-        if notifier is not None:
-            try:
-                notifier.send(inc)
-            except Exception:
-                _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
+                if notifier is not None:
+                    try:
+                        notifier.send(inc)
+                    except Exception:
+                        _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
+                _emit_incident(inc, output_json)
+                open_incidents.append(inc)
+                continue
+
+            target = decision.target
+            if target is None:
+                store.save(inc)
+                _emit_incident(inc, output_json)
+                continue
+
+            merged = merger.merge(target, inc, graph)
+            merged.recurrence_count = inc.recurrence_count
+            if store.update(merged):
+                open_incidents = [
+                    merged if existing.incident_id == target.incident_id else existing
+                    for existing in open_incidents
+                ]
+            else:
+                store.save(merged)
+            _emit_incident(merged, output_json)
+        except Exception:
+            _logger.warning("Failed to save/merge incident %s", inc.incident_id, exc_info=True)
 
     return incidents
 
@@ -161,17 +206,24 @@ def run_batch(
     maintenance_checker: object = None,
     notifier: object = None,
 ) -> int:
-    """ファイルを一括処理してインシデント総数を返す。"""
+    """ファイルを時刻順に処理してインシデント総数を返す。"""
     text = Path(file_path).read_text(encoding="utf-8", errors="replace")
     messages = [m for line in text.splitlines() if (m := _parse_line(line)) is not None]
     _logger.info("Parsed %d syslog line(s) from %s", len(messages), file_path)
 
-    windows = _group_by_window(messages, window_sec)
-    _logger.info("Grouped into %d time window(s) of %ds", len(windows), window_sec)
-
+    messages.sort(key=lambda m: m.received_at)
     total = 0
-    for window in windows:
-        total += len(_process_window(window, graph, inferencer, syslog_filter, output_json, store, maintenance_checker, notifier))
+    for message in messages:
+        total += len(_process_message(
+            message,
+            graph,
+            inferencer,
+            syslog_filter,
+            output_json,
+            store,
+            maintenance_checker,
+            notifier,
+        ))
     return total
 
 
@@ -186,41 +238,30 @@ async def run_stream(
     maintenance_checker: object = None,
     notifier: object = None,
 ) -> int:
-    """標準入力をストリーミング読み込みしてインシデントを処理する。
-
-    window_sec 秒間新規行が来なければバッファをフラッシュして推論する。
-    EOF でも残バッファをフラッシュする。
-    """
+    """標準入力を 1 行ずつ処理してインシデントを生成する。"""
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
 
-    buffer: list[SyslogMessage] = []
     total = 0
-
-    async def _flush() -> None:
-        nonlocal total
-        if not buffer:
-            return
-        msgs = buffer.copy()
-        buffer.clear()
-        total += len(_process_window(msgs, graph, inferencer, syslog_filter, output_json, store, maintenance_checker, notifier))
-
     while True:
-        try:
-            raw = await asyncio.wait_for(reader.readline(), timeout=float(window_sec))
-        except asyncio.TimeoutError:
-            await _flush()
-            continue
-
+        raw = await reader.readline()
         if not raw:  # EOF
-            await _flush()
             break
 
         line = raw.decode("utf-8", errors="replace").rstrip("\n")
         msg = _parse_line(line)
         if msg is not None:
-            buffer.append(msg)
+            total += len(_process_message(
+                msg,
+                graph,
+                inferencer,
+                syslog_filter,
+                output_json,
+                store,
+                maintenance_checker,
+                notifier,
+            ))
 
     return total

@@ -1,10 +1,16 @@
 """POST /ingest および WebSocket エンドポイントのテスト。"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import create_app
+from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
+from topology_syslog.ingestion.file_ingest import run_batch
+from topology_syslog.models import Incident
+from topology_syslog.persistence.incident_store import IncidentStore
 
 # RFC 3164 形式のテスト用シスログ行
 _CHAIN_MSGS = [
@@ -93,3 +99,36 @@ def test_ingest_broadcasts_to_websocket(client):
         msg = ws.receive_json()
         assert msg["type"] == "incident.new"
         assert msg["incident"]["root_cause_node"] == "Core-Router1"
+
+
+def test_run_batch_merges_later_upstream_root_cause_into_open_incident(poc_engine, tmp_path):
+    store = IncidentStore("sqlite:///:memory:")
+    store.save(Incident(
+        incident_id="INC-OLD-001",
+        created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+        root_cause_node="Dist-Switch1",
+        primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
+        secondary_nodes=["Access-SW1"],
+        raw_log_count=1,
+        raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
+        status="OPEN",
+    ))
+
+    log_path = tmp_path / "batch.log"
+    log_path.write_text(
+        "<34>Aug 16 10:00:01 Core-Router1 %LINK-3-UPDOWN: Interface GE0/1 down\n",
+        encoding="utf-8",
+    )
+
+    count = run_batch(
+        str(log_path),
+        poc_engine,
+        RootCauseInferencer(),
+        store=store,
+    )
+
+    assert count == 1
+    merged = store.get_by_id("INC-OLD-001")
+    assert merged is not None
+    assert merged.root_cause_node == "Core-Router1"
+    assert "Dist-Switch1" in merged.secondary_nodes
