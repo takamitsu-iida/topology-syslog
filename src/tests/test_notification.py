@@ -4,7 +4,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from topology_syslog.models import Incident
+from topology_syslog.notification.base import NotificationEvent
 from topology_syslog.notification.slack import SlackNotifier, _build_payload
+from topology_syslog.notification.vigil import VigilNotifier
 from topology_syslog.notification.webhook import WebhookNotifier
 
 
@@ -38,6 +40,8 @@ def test_webhook_sends_correct_payload():
     assert payload["secondary_nodes"] == ["Dist-Switch1", "Access-SW1"]
     assert payload["raw_log_count"] == 3
     assert payload["created_at"].startswith("2026-08-16T10:00:00")
+    assert payload["event_type"] == "incident.new"
+    assert payload["condition"] == "ACTIVE"
 
 
 def test_webhook_posts_to_correct_url():
@@ -55,6 +59,19 @@ def test_webhook_sends_custom_headers():
         ).send(_inc())
 
     assert mock_post.call_args.kwargs["headers"]["X-Token"] == "secret"
+
+
+def test_webhook_sends_lifecycle_payload():
+    incident = _inc()
+    incident.condition = "RECOVERING"
+    incident.recovery_evidence = ["link up"]
+    with patch("httpx.post", return_value=_mock_ok_response()) as mock_post:
+        WebhookNotifier("http://example.com/notify").send_lifecycle(incident, NotificationEvent.RECOVERING)
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["event_type"] == "incident.recovering"
+    assert payload["condition"] == "RECOVERING"
+    assert payload["recovery_evidence"] == ["link up"]
 
 
 def test_webhook_propagates_http_error():
@@ -82,6 +99,14 @@ def test_slack_header_block_contains_incident_id():
     assert "INC-20260816-001" in header_text
 
 
+def test_slack_lifecycle_header_names_recovery_event():
+    payload = _build_payload(_inc(), NotificationEvent.RECOVERING)
+    header_text = payload["blocks"][0]["text"]["text"]
+    fields_text = str(payload["blocks"][1]["fields"])
+    assert "復旧確認中" in header_text
+    assert "ACTIVE" in fields_text
+
+
 def test_slack_section_contains_root_cause():
     payload = _build_payload(_inc())
     fields_text = str(payload["blocks"][1]["fields"])
@@ -94,3 +119,22 @@ def test_slack_propagates_http_error():
     with patch("httpx.post", return_value=mock_resp):
         with pytest.raises(Exception, match="HTTP 403"):
             SlackNotifier("https://hooks.slack.com/bad").send(_inc())
+
+
+def test_vigil_recovered_lifecycle_resolves_by_source():
+    with patch("httpx.post", return_value=_mock_ok_response()) as mock_post:
+        VigilNotifier("http://vigil.test", team_name="netops").send_lifecycle(_inc(), NotificationEvent.RECOVERED)
+
+    assert mock_post.call_args.args[0] == "http://vigil.test/api/v1/incidents/resolve-by-source"
+    assert mock_post.call_args.kwargs["json"] == {"source": "Core-Router1"}
+
+
+def test_vigil_flapping_lifecycle_uses_p2_priority():
+    incident = _inc()
+    incident.condition = "FLAPPING"
+    with patch("httpx.post", return_value=_mock_ok_response()) as mock_post:
+        VigilNotifier("http://vigil.test", team_name="netops").send_lifecycle(incident, NotificationEvent.FLAPPING)
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["priority"] == "P2"
+    assert payload["title"].startswith("[FLAPPING]")

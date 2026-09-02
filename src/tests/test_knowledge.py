@@ -8,7 +8,7 @@ from topology_syslog.knowledge.classifier import EventClassifier
 from topology_syslog.knowledge.matcher import KnowledgeMatcher
 from topology_syslog.knowledge.policy import SeverityAction, resolve_severity_action
 from topology_syslog.knowledge.store import KnowledgeRule, KnowledgeStore
-from topology_syslog.models import ClassificationReason, EventAction, EventClassification, EventClassificationResult
+from topology_syslog.models import ClassificationReason, EventAction, EventClassification, EventClassificationResult, Incident
 from topology_syslog.persistence.raw_log_store import RawLogStore
 from topology_syslog.persistence.unknown_event_store import UnknownEventStore
 from topology_syslog.topology.graph_engine import GraphEngine
@@ -372,6 +372,165 @@ def test_unknown_event_api_includes_classification_candidate(tmp_path):
         assert event["representative_severity"] == 2
         assert event["classification_candidate"] == "unknown"
         assert event["recommended_action"] == "review"
+
+
+def test_process_recovery_updates_incident_to_recovering_then_recovered(tmp_path):
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """rules:
+- id: link-updown
+  signature: "%LINK-*-UPDOWN"
+  status: approved
+  classification: fault-signal
+  severity_policy:
+    "0-7": create_incident
+""",
+        encoding="utf-8",
+    )
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        knowledge_path=str(rules_path),
+        syslog_port=0,
+        recovery_quiet_period_sec=0.01,
+    )
+    with TestClient(app):
+        app.state.graph = _single_node_graph()
+        async def scenario():
+            fault = parse(b"<34>Aug 15 10:00:00 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", "10.0.0.1")
+            await _process_message_immediately(app, fault)
+            incident = app.state.store.list_incidents()[0]
+
+            recovery = parse(b"<34>Aug 15 10:00:01 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up", "10.0.0.1")
+            await _process_message_immediately(app, recovery)
+            recovering = app.state.store.get_by_id(incident.incident_id)
+            assert recovering.condition == "RECOVERING"
+            assert recovering.recovery_evidence == ["%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up"]
+
+            await __import__("asyncio").sleep(0.02)
+            recovered = app.state.store.get_by_id(incident.incident_id)
+            assert recovered.condition == "RECOVERED"
+
+        __import__("asyncio").run(scenario())
+
+
+def test_fault_during_quiet_period_keeps_incident_unrecovered(tmp_path):
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """rules:
+- id: link-updown
+  signature: "%LINK-*-UPDOWN"
+  status: approved
+  classification: fault-signal
+  severity_policy:
+    "0-7": create_incident
+""",
+        encoding="utf-8",
+    )
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        knowledge_path=str(rules_path),
+        syslog_port=0,
+        recovery_quiet_period_sec=0.02,
+        recovery_flap_threshold=1,
+    )
+    with TestClient(app):
+        app.state.graph = _single_node_graph()
+        async def scenario():
+            first_fault = parse(b"<34>Aug 15 10:00:00 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", "10.0.0.1")
+            await _process_message_immediately(app, first_fault)
+            incident = app.state.store.list_incidents()[0]
+
+            recovery = parse(b"<34>Aug 15 10:00:01 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up", "10.0.0.1")
+            await _process_message_immediately(app, recovery)
+            second_fault = parse(b"<34>Aug 15 10:00:02 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", "10.0.0.1")
+            await _process_message_immediately(app, second_fault)
+            await __import__("asyncio").sleep(0.03)
+
+            updated = app.state.store.get_by_id(incident.incident_id)
+            assert updated.condition == "FLAPPING"
+            assert updated.last_fault_at is not None
+
+        __import__("asyncio").run(scenario())
+
+
+def test_recovery_lifecycle_broadcasts_recovering_and_recovered(tmp_path):
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """rules:
+- id: link-updown
+  signature: "%LINK-*-UPDOWN"
+  status: approved
+  classification: fault-signal
+  severity_policy:
+    "0-7": create_incident
+""",
+        encoding="utf-8",
+    )
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        knowledge_path=str(rules_path),
+        syslog_port=0,
+        recovery_quiet_period_sec=0.01,
+    )
+    with TestClient(app) as client:
+        app.state.graph = _single_node_graph()
+        broadcasts = []
+
+        async def capture(payload):
+            broadcasts.append(payload)
+
+        app.state.ws_manager.broadcast = capture
+
+        async def scenario():
+            fault = parse(b"<34>Aug 15 10:00:00 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", "10.0.0.1")
+            await _process_message_immediately(app, fault)
+            recovery = parse(b"<34>Aug 15 10:00:01 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up", "10.0.0.1")
+            await _process_message_immediately(app, recovery)
+            await __import__("asyncio").sleep(0.03)
+
+        __import__("asyncio").run(scenario())
+
+        event_types = [payload["type"] for payload in broadcasts]
+        assert "incident.new" in event_types
+        assert "incident.recovering" in event_types
+        assert "incident.recovered" in event_types
+        assert next(payload for payload in broadcasts if payload["type"] == "incident.recovering")["incident"]["condition"] == "RECOVERING"
+        assert next(payload for payload in broadcasts if payload["type"] == "incident.recovered")["incident"]["condition"] == "RECOVERED"
+
+
+def test_manual_closed_incident_ignores_late_recovery(tmp_path):
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(
+        """rules:
+- id: link-updown
+  signature: "%LINK-*-UPDOWN"
+  status: approved
+  classification: fault-signal
+  severity_policy:
+    "0-7": create_incident
+""",
+        encoding="utf-8",
+    )
+    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    with TestClient(app):
+        app.state.graph = _single_node_graph()
+        incident = Incident(
+            incident_id="INC-CLOSED",
+            created_at=datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc),
+            root_cause_node="r1",
+            primary_event="%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
+            raw_log_count=1,
+            raw_logs=["%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down"],
+            status="CLOSED",
+        )
+        app.state.store.save(incident)
+        recovery = parse(b"<34>Aug 15 10:00:01 r1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up", "10.0.0.1")
+        __import__("asyncio").run(_process_message_immediately(app, recovery))
+
+        updated = app.state.store.get_by_id("INC-CLOSED")
+        assert updated.status == "CLOSED"
+        assert updated.condition == "ACTIVE"
+        assert updated.recovery_evidence == []
 
 
 def test_severity_policy_retain_only_skips_incident_creation(tmp_path):

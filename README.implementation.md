@@ -35,7 +35,7 @@
 | Phase 10: 即時推論 + 既存インシデント統合 | ✅ 完了 | 10-1〜10-7 実装完了、回帰テスト 78 passed |
 | Phase 11: SYSLOG Knowledge Base (SKB) | ✅ 完了 | 11-1〜11-8 実装完了、SKB 回帰テスト 41 passed |
 | Phase 12: SYSLOG分類レイヤー強化 | ✅ 完了 | 12-1〜12-7 実装完了、Knowledge 回帰テスト 28 passed、frontend build passed |
-| Phase 13: 復旧イベント対応 | ⏳ 未着手 | 障害・復旧・フラッピングをインシデント状態遷移として扱う |
+| Phase 13: 復旧イベント対応 | ✅ 完了 | 13-1〜13-7 実装完了、Phase 13 回帰テスト 42 passed、frontend build passed |
 | Phase 14: 説明可能なRCA + Confidence | ⏳ 未着手 | 根本原因推論の根拠、代替候補、確信度を構造化 |
 | Phase 15: 影響範囲算出 | ⏳ 未着手 | トポロジーから拠点、VLAN、VRF、冗長性への影響を算出 |
 
@@ -58,7 +58,7 @@
 | **Phase 10** | 即時推論 + 既存インシデント統合 | 30秒タイムウィンドウ待ちを廃止し、受信ごとに推論・既存インシデントへ統合する | `api/main.py`, `file_ingest.py`, `incident_store.py`, `incident_merger.py` | ✅ 完了 |
 | **Phase 11** | SYSLOG Knowledge Base (SKB) | 既知/未知の SYSLOG を分類し、Severity を含む運用ポリシー、対処手順、承認済み知識を継続的に活用する | `knowledge/` モジュール、SKB YAML/DB、レビュー API/UI | ✅ 完了 |
 | **Phase 12** | SYSLOG分類レイヤー強化 | 常時流れる SYSLOG を保存対象と推論対象へ分離し、ノイズや状態変化を安全に扱う | `knowledge/`, `ingestion/`, `correlation/`, `persistence/raw_log_store.py` | ✅ 完了 |
-| **Phase 13** | 復旧イベント対応 | down/up や established/lost を状態遷移として扱い、インシデントを自動更新・自動クローズする | `correlation/`, `persistence/incident_store.py`, `api/main.py`, UI | ⏳ 未着手 |
+| **Phase 13** | 復旧イベント対応 | down/up や established/lost を状態遷移として扱い、インシデントを自動更新・自動クローズする | `correlation/`, `persistence/incident_store.py`, `api/main.py`, UI | ✅ 完了 |
 | **Phase 14** | 説明可能なRCA + Confidence | 根本原因判定の根拠、代替候補、確信度を構造化し、API/UI/AIレポートへ展開する | `correlation/root_cause_inferencer.py`, `models.py`, `api/schemas.py`, UI | ⏳ 未着手 |
 | **Phase 15** | 影響範囲算出 | トポロジー属性から影響拠点、VLAN、VRF、BGP peer、冗長性を算出する | `topology/graph_engine.py`, `correlation/`, `api/routes/`, UI | ⏳ 未着手 |
 
@@ -1533,7 +1533,7 @@ npm run build
 
 ---
 
-## Phase 13: 復旧イベント対応 ⏳ 未着手
+## Phase 13: 復旧イベント対応 ✅ 完了
 
 ### 目的
 
@@ -1563,13 +1563,13 @@ npm run build
 
 | # | サブフェーズ | タスク | 対象ファイル | 状態 |
 |---|---|---|---|---|
-| 13-1 | A: 状態モデル | インシデント状態、復旧対象、最後の障害/復旧時刻、フラップ回数をモデル化する | `models.py`, `persistence/incident_store.py` | ⏳ |
-| 13-2 | B: 復旧マッチング | recovery event を既存インシデントの root / secondary / interface / peer に対応付ける | `correlation/recovery_matcher.py` | ⏳ |
-| 13-3 | C: 状態遷移 | `OPEN`、`RECOVERING`、`RECOVERED`、`FLAPPING` の遷移ルールを実装する | `correlation/incident_lifecycle.py` | ⏳ |
-| 13-4 | D: 静穏確認 | 復旧後の hold-down / quiet period を設定可能にし、再発時はクローズしない | `api/main.py`, `config.py` | ⏳ |
-| 13-5 | E: 通知 | 新規障害、部分復旧、完全復旧、フラッピングで通知種別を分ける | `notification/`, `api/schemas.py` | ⏳ |
-| 13-6 | F: UI | インシデント詳細に状態遷移タイムラインと復旧証跡を表示する | `frontend/src/pages/IncidentDetail.tsx` | ⏳ |
-| 13-7 | G: テスト | 復旧、部分復旧、再発、フラッピング、手動クローズとの競合をテストする | `src/tests/test_incident_store.py`, `src/tests/test_api_ingest.py` | ⏳ |
+| 13-1 | A: 状態モデル | インシデント状態、復旧対象、最後の障害/復旧時刻、フラップ回数をモデル化する | `models.py`, `persistence/incident_store.py` | ✅ |
+| 13-2 | B: 復旧マッチング | recovery event を既存インシデントの root / secondary / interface / peer に対応付ける | `correlation/recovery_matcher.py` | ✅ |
+| 13-3 | C: 状態遷移 | `OPEN`、`RECOVERING`、`RECOVERED`、`FLAPPING` の遷移ルールを実装する | `correlation/incident_lifecycle.py` | ✅ |
+| 13-4 | D: 静穏確認 | 復旧後の hold-down / quiet period を設定可能にし、再発時はクローズしない | `api/main.py`, `config.py` | ✅ |
+| 13-5 | E: 通知 | 新規障害、部分復旧、完全復旧、フラッピングで通知種別を分ける | `notification/`, `api/schemas.py` | ✅ |
+| 13-6 | F: UI | インシデント詳細に状態遷移タイムラインと復旧証跡を表示する | `frontend/src/pages/IncidentDetail.tsx` | ✅ |
+| 13-7 | G: テスト | 復旧、部分復旧、再発、フラッピング、手動クローズとの競合をテストする | `src/tests/test_incident_store.py`, `src/tests/test_api_ingest.py` | ✅ |
 
 ### テストシナリオ
 
@@ -1583,12 +1583,180 @@ npm run build
 
 ### 完了条件
 
+- [x] インシデントに状態遷移用の時刻、フラップ回数、復旧証跡を保存できる
 - [ ] 復旧イベントが新規インシデントを作らない
-- [ ] 復旧イベントが対応する既存インシデントへ証跡として保存される
-- [ ] quiet period 後に自動で `RECOVERED` または `CLOSED` へ遷移できる
-- [ ] 再発時に `FLAPPING` を検知できる
-- [ ] 復旧・再発・手動操作の状態遷移が監査可能である
-- [ ] UI と WebSocket が状態更新をリアルタイム表示できる
+- [x] 復旧イベントを対応する既存インシデントの root / secondary / interface / peer に対応付けできる
+- [x] 復旧イベントが対応する既存インシデントへ証跡として保存される
+- [x] quiet period 後に自動で `RECOVERED` へ遷移できる
+- [x] 再発時に `FLAPPING` を検知できる
+- [x] 復旧・再発の状態遷移を通知イベント種別として外部連携できる
+- [x] 手動クローズ済みインシデントが遅延復旧イベントで再オープンされない
+- [x] UI が状態遷移と復旧証跡を表示できる
+- [x] WebSocket が状態更新をリアルタイム表示できる
+
+### 13-1 検証結果
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py::test_incident_lifecycle_fields_are_persisted src/tests/test_incident_store.py::test_update_persists_incident_lifecycle_fields
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+IncidentStore 全体の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py
+```
+
+結果:
+
+- 15 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、13-1 の状態モデルには影響しない。
+
+### 13-2 検証結果
+
+```bash
+python -m pytest -q src/tests/test_recovery_matcher.py
+```
+
+結果:
+
+- 4 passed
+- 1 warning
+
+Phase 13 前半の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_recovery_matcher.py
+```
+
+結果:
+
+- 19 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、13-2 の復旧マッチングには影響しない。
+
+### 13-3 検証結果
+
+```bash
+python -m pytest -q src/tests/test_incident_lifecycle.py
+```
+
+結果:
+
+- 5 passed
+- 1 warning
+
+Phase 13-1〜13-3 の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_recovery_matcher.py src/tests/test_incident_lifecycle.py
+```
+
+結果:
+
+- 24 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、13-3 の状態遷移には影響しない。
+
+### 13-4 検証結果
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py::test_list_open_lifecycle_returns_recovery_candidates src/tests/test_incident_lifecycle.py::test_fault_after_recovery_seen_prevents_recovered_confirmation src/tests/test_knowledge.py::test_process_recovery_updates_incident_to_recovering_then_recovered src/tests/test_knowledge.py::test_fault_during_quiet_period_keeps_incident_unrecovered
+```
+
+結果:
+
+- 4 passed
+- 1 warning
+
+Phase 13-1〜13-4 の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_recovery_matcher.py src/tests/test_incident_lifecycle.py src/tests/test_knowledge.py::test_process_recovery_updates_incident_to_recovering_then_recovered src/tests/test_knowledge.py::test_fault_during_quiet_period_keeps_incident_unrecovered
+```
+
+結果:
+
+- 28 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、13-4 の静穏確認には影響しない。
+
+### 13-5 検証結果
+
+```bash
+python -m pytest -q src/tests/test_notification.py
+```
+
+結果:
+
+- 12 passed
+- 1 warning
+
+Phase 13-1〜13-5 の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_recovery_matcher.py src/tests/test_incident_lifecycle.py src/tests/test_notification.py src/tests/test_knowledge.py::test_process_recovery_updates_incident_to_recovering_then_recovered src/tests/test_knowledge.py::test_fault_during_quiet_period_keeps_incident_unrecovered
+```
+
+結果:
+
+- 40 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、13-5 の通知種別には影響しない。
+
+### 13-6 検証結果
+
+```bash
+cd frontend && npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
+
+### 13-7 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_recovery_lifecycle_broadcasts_recovering_and_recovered src/tests/test_knowledge.py::test_manual_closed_incident_ignores_late_recovery
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+Phase 13 全体の回帰として以下を確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_recovery_matcher.py src/tests/test_incident_lifecycle.py src/tests/test_notification.py src/tests/test_knowledge.py::test_process_recovery_updates_incident_to_recovering_then_recovered src/tests/test_knowledge.py::test_fault_during_quiet_period_keeps_incident_unrecovered src/tests/test_knowledge.py::test_recovery_lifecycle_broadcasts_recovering_and_recovered src/tests/test_knowledge.py::test_manual_closed_incident_ignores_late_recovery
+```
+
+結果:
+
+- 42 passed
+- 1 warning
+
+フロントエンド UI の回帰として以下も確認した。
+
+```bash
+cd frontend && npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
 
 ---
 

@@ -25,6 +25,14 @@ class EventAction(StrEnum):
     SECURITY_NOTIFY = "security_notify"
 
 
+class IncidentCondition(StrEnum):
+    ACTIVE = "ACTIVE"
+    DEGRADED = "DEGRADED"
+    RECOVERING = "RECOVERING"
+    RECOVERED = "RECOVERED"
+    FLAPPING = "FLAPPING"
+
+
 @dataclass(frozen=True)
 class ClassificationReason:
     source: str
@@ -104,6 +112,10 @@ class Incident:
     raw_log_count: int = 0
     raw_logs: list[str] = field(default_factory=list)
     status: str = "OPEN"      # オペレーター管理のライフサイクル: "OPEN" | "CLOSED"
-    condition: str = "ACTIVE"  # ネットワーク現在状況（自動更新）: "ACTIVE" | "RECOVERED" | "FLAPPING"
+    condition: str = IncidentCondition.ACTIVE.value  # ネットワーク現在状況（自動更新）
     recurrence_count: int = 0  # 同一根本原因の過去インシデント件数（保存直前に設定）
     maintenance_plan_id: str | None = None  # メンテナンス計画によって自動クローズされた場合の計画 ID
+    last_fault_at: datetime | None = None
+    last_recovery_at: datetime | None = None
+    flap_count: int = 0
+    recovery_evidence: list[str] = field(default_factory=list)

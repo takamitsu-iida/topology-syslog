@@ -16,6 +16,10 @@ def _inc(
     condition: str = "ACTIVE",
     root_cause_node: str = "Core-Router1",
     created_at: datetime | None = None,
+    last_fault_at: datetime | None = None,
+    last_recovery_at: datetime | None = None,
+    flap_count: int = 0,
+    recovery_evidence: list[str] | None = None,
 ) -> Incident:
     return Incident(
         incident_id=incident_id,
@@ -27,6 +31,10 @@ def _inc(
         raw_logs=["raw-1", "raw-2", "raw-3"],
         status=status,
         condition=condition,
+        last_fault_at=last_fault_at,
+        last_recovery_at=last_recovery_at,
+        flap_count=flap_count,
+        recovery_evidence=recovery_evidence or [],
     )
 
 
@@ -157,6 +165,62 @@ def test_list_open_active_returns_merge_candidates_only():
 
     results = store.list_open_active()
     assert [inc.incident_id for inc in results] == ["INC-FLAPPING", "INC-ACTIVE"]
+
+
+def test_list_open_lifecycle_returns_recovery_candidates():
+    store = _store()
+    store.save(_inc("INC-ACTIVE", condition="ACTIVE"))
+    store.save(_inc("INC-DEGRADED", condition="DEGRADED"))
+    store.save(_inc("INC-RECOVERING", condition="RECOVERING"))
+    store.save(_inc("INC-RECOVERED", condition="RECOVERED"))
+    store.save(_inc("INC-CLOSED", status="CLOSED", condition="RECOVERING"))
+
+    results = store.list_open_lifecycle()
+
+    assert {inc.incident_id for inc in results} == {"INC-ACTIVE", "INC-DEGRADED", "INC-RECOVERING", "INC-RECOVERED"}
+
+
+def test_incident_lifecycle_fields_are_persisted():
+    store = _store()
+    last_fault_at = datetime(2026, 8, 16, 10, 5, 0, tzinfo=timezone.utc)
+    last_recovery_at = datetime(2026, 8, 16, 10, 7, 0, tzinfo=timezone.utc)
+    store.save(_inc(
+        condition="RECOVERING",
+        last_fault_at=last_fault_at,
+        last_recovery_at=last_recovery_at,
+        flap_count=2,
+        recovery_evidence=["%LINK-3-UPDOWN: Interface GE0/0 up"],
+    ))
+
+    result = store.get_by_id("INC-20260816-001")
+
+    assert result is not None
+    assert result.condition == "RECOVERING"
+    assert result.last_fault_at == last_fault_at
+    assert result.last_recovery_at == last_recovery_at
+    assert result.flap_count == 2
+    assert result.recovery_evidence == ["%LINK-3-UPDOWN: Interface GE0/0 up"]
+
+
+def test_update_persists_incident_lifecycle_fields():
+    store = _store()
+    incident = _inc()
+    store.save(incident)
+    incident.condition = "DEGRADED"
+    incident.last_fault_at = datetime(2026, 8, 16, 10, 8, 0, tzinfo=timezone.utc)
+    incident.last_recovery_at = datetime(2026, 8, 16, 10, 9, 0, tzinfo=timezone.utc)
+    incident.flap_count = 3
+    incident.recovery_evidence = ["BGP neighbor established"]
+
+    assert store.update(incident) is True
+    updated = store.get_by_id(incident.incident_id)
+
+    assert updated is not None
+    assert updated.condition == "DEGRADED"
+    assert updated.last_fault_at == incident.last_fault_at
+    assert updated.last_recovery_at == incident.last_recovery_at
+    assert updated.flap_count == 3
+    assert updated.recovery_evidence == ["BGP neighbor established"]
 
 
 def test_created_at_tz_preserved():

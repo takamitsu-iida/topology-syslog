@@ -6,7 +6,7 @@ import logging
 import httpx
 
 from topology_syslog.models import Incident
-from topology_syslog.notification.base import BaseNotifier
+from topology_syslog.notification.base import BaseNotifier, NotificationEvent
 
 _logger = logging.getLogger(__name__)
 
@@ -28,7 +28,16 @@ class VigilNotifier(BaseNotifier):
         self._sent_alerts: set[str] = set()
 
     def send(self, incident: Incident) -> None:
+        self.send_lifecycle(incident, NotificationEvent.NEW)
+
+    def send_lifecycle(self, incident: Incident, event: NotificationEvent) -> None:
+        if event == NotificationEvent.RECOVERED:
+            self.resolve_by_source(incident.root_cause_node)
+            return
+
         fingerprint = f"{incident.incident_id}:{incident.root_cause_node}:{incident.primary_event}"
+        if event != NotificationEvent.NEW:
+            fingerprint = f"{fingerprint}:{event.value}:{incident.condition}"
         if fingerprint in self._sent_alerts:
             _logger.debug("Skip duplicate vigil alert for %s", fingerprint)
             return
@@ -38,18 +47,26 @@ class VigilNotifier(BaseNotifier):
         description = f"影響ノード: {affected} / ログ件数: {incident.raw_log_count}"
         if incident.recurrence_count:
             description += f" / 再発: {incident.recurrence_count}回"
+        if incident.condition:
+            description += f" / 状態: {incident.condition}"
 
         # FLAPPING または再発インシデントは P2 に昇格
         priority = (
             "P2"
-            if incident.status == "FLAPPING" or incident.recurrence_count > 0
+            if incident.condition == "FLAPPING" or incident.recurrence_count > 0
             else self._default_priority
         )
+        title_prefix = {
+            NotificationEvent.NEW: "NEW",
+            NotificationEvent.UPDATED: "UPDATED",
+            NotificationEvent.RECOVERING: "RECOVERING",
+            NotificationEvent.FLAPPING: "FLAPPING",
+        }.get(event, "UPDATED")
 
         httpx.post(
             self._url,
             json={
-                "title": f"[{incident.incident_id}] {incident.root_cause_node}: {incident.primary_event}",
+                "title": f"[{title_prefix}] [{incident.incident_id}] {incident.root_cause_node}: {incident.primary_event}",
                 "description": description,
                 "source": incident.root_cause_node,
                 "team_name": self._team_name,

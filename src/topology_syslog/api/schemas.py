@@ -20,6 +20,10 @@ class IncidentOut(BaseModel):
     condition: str
     recurrence_count: int
     maintenance_plan_id: str | None = None
+    last_fault_at: datetime | None = None
+    last_recovery_at: datetime | None = None
+    flap_count: int = 0
+    recovery_evidence: list[str] = []
 
 
 class IncidentListOut(BaseModel):

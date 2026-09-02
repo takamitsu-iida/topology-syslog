@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 
 from topology_syslog.models import Incident
-from topology_syslog.notification.base import BaseNotifier
+from topology_syslog.notification.base import BaseNotifier, NotificationEvent
 
 
 class WebhookNotifier(BaseNotifier):
@@ -20,7 +20,11 @@ class WebhookNotifier(BaseNotifier):
         self._headers = headers or {}
 
     def send(self, incident: Incident) -> None:
+        self.send_lifecycle(incident, NotificationEvent.NEW)
+
+    def send_lifecycle(self, incident: Incident, event: NotificationEvent) -> None:
         payload = {
+            "event_type":               event.value,
             "incident_id":              incident.incident_id,
             "root_cause":               incident.root_cause_node,
             "primary_event":            incident.primary_event,
@@ -28,6 +32,12 @@ class WebhookNotifier(BaseNotifier):
             "secondary_nodes":          incident.secondary_nodes,
             "raw_log_count":            incident.raw_log_count,
             "created_at":               incident.created_at.isoformat(),
+            "status":                   incident.status,
+            "condition":                incident.condition,
+            "last_fault_at":            incident.last_fault_at.isoformat() if incident.last_fault_at else None,
+            "last_recovery_at":         incident.last_recovery_at.isoformat() if incident.last_recovery_at else None,
+            "flap_count":               incident.flap_count,
+            "recovery_evidence":        incident.recovery_evidence,
         }
         httpx.post(
             self._url,

@@ -9,10 +9,16 @@ interface Props {
 type StateBadge = { label: string; cls: string }
 
 function getStateBadge(incident: Incident): StateBadge {
-  if (incident.status === 'RESOLVED')
-    return { label: '復旧済', cls: 'bg-gray-200 text-gray-600' }
-  if (incident.status === 'FLAPPING')
+  if (incident.condition === 'RECOVERED')
+    return { label: '復旧済', cls: 'bg-emerald-100 text-emerald-700' }
+  if (incident.condition === 'RECOVERING')
+    return { label: '復旧確認中', cls: 'bg-sky-100 text-sky-700' }
+  if (incident.condition === 'DEGRADED')
+    return { label: '部分復旧', cls: 'bg-yellow-100 text-yellow-700' }
+  if (incident.condition === 'FLAPPING')
     return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
+  if (incident.status === 'CLOSED' || incident.status === 'RESOLVED')
+    return { label: 'クローズ済', cls: 'bg-gray-200 text-gray-600' }
   if (incident.recurrence_count > 0)
     return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
   return { label: '新規発生', cls: 'bg-red-100 text-red-700' }
@@ -28,6 +34,7 @@ export function IncidentCard({ incident, onResolve }: Props) {
                 : 'border-red-300 bg-red-50',
     FLAPPING: 'border-amber-300 bg-amber-50',
     RESOLVED: 'border-gray-200 bg-gray-50',
+    CLOSED: 'border-gray-200 bg-gray-50',
   }[incident.status] ?? 'border-gray-200 bg-gray-50'
 
   return (

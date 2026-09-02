@@ -19,6 +19,8 @@ class CorrelationConfig:
     mode: str = "immediate"
     window_sec: int = 30
     max_buffer_size: int = 100_000
+    recovery_quiet_period_sec: float = 30.0
+    recovery_flap_threshold: int = 2
 
 
 @dataclass
@@ -71,6 +73,8 @@ def _apply(cfg: AppConfig, raw: dict) -> None:
         cfg.correlation.mode = c.get("mode", cfg.correlation.mode)
         cfg.correlation.window_sec = c.get("window_sec", cfg.correlation.window_sec)
         cfg.correlation.max_buffer_size = c.get("max_buffer_size", cfg.correlation.max_buffer_size)
+        cfg.correlation.recovery_quiet_period_sec = c.get("recovery_quiet_period_sec", cfg.correlation.recovery_quiet_period_sec)
+        cfg.correlation.recovery_flap_threshold = c.get("recovery_flap_threshold", cfg.correlation.recovery_flap_threshold)
         legacy_keys = [
             key for key in ("window_sec", "burst_window_sec", "burst_threshold", "window_extend_factor", "window_sec_max")
             if key in c

@@ -219,6 +219,8 @@ def main() -> None:
         window_sec_max=int(os.getenv("WINDOW_SEC_MAX", "120")),
         inference_severity_threshold=int(os.getenv("INFERENCE_SEVERITY_THRESHOLD", "5")),
         flapping_threshold=int(os.getenv("FLAPPING_THRESHOLD", "3")),
+        recovery_quiet_period_sec=float(os.getenv("RECOVERY_QUIET_PERIOD_SEC", "30.0")),
+        recovery_flap_threshold=int(os.getenv("RECOVERY_FLAP_THRESHOLD", "2")),
         ai_enabled=os.getenv("AI_ENABLED", "false").lower() == "true",
         ai_rag_path=os.getenv("AI_RAG_PATH", ".chromadb"),
         ai_cache_ttl_days=int(os.getenv("AI_CACHE_TTL_DAYS", "7")),

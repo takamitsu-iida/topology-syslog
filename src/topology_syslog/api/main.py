@@ -22,11 +22,14 @@ from topology_syslog.api.routes.raw_logs import router as raw_logs_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
+from topology_syslog.correlation.incident_lifecycle import IncidentLifecycle
 from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAction
+from topology_syslog.correlation.recovery_matcher import RecoveryMatcher
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
 from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident, should_skip_inference
+from topology_syslog.notification.base import NotificationEvent
 from topology_syslog.persistence.incident_store import IncidentStore
 from topology_syslog.persistence.knowledge_audit_store import KnowledgeAuditStore
 from topology_syslog.persistence.raw_log_store import RawLogStore
@@ -83,21 +86,30 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
     if msg.is_recovery:
         if not graph.node_exists(msg.hostname):
             return
-        recovered_ids = await asyncio.to_thread(app.state.store.recover_by_root_cause, msg.hostname)
-        for rid in recovered_ids:
-            recovered_inc = await asyncio.to_thread(app.state.store.get_by_id, rid)
-            if recovered_inc:
-                _logger.info("Auto-recovered %s (root_cause=%s sent recovery event)", rid, msg.hostname)
+        open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
+        matches = app.state.recovery_matcher.find_matches(msg, open_incidents)
+        updated_ids: set[str] = set()
+        for incident in open_incidents:
+            incident_matches = [match for match in matches if match.incident.incident_id == incident.incident_id]
+            if not incident_matches:
+                continue
+            updated = app.state.lifecycle.apply_recovery(incident, incident_matches, msg.received_at)
+            if await asyncio.to_thread(app.state.store.update, updated):
+                updated_ids.add(updated.incident_id)
+                await _notify_lifecycle(app, updated, NotificationEvent.RECOVERING)
                 await app.state.ws_manager.broadcast({
-                    "type": "incident.recovered",
-                    "incident_id": rid,
-                    "incident": IncidentOut.model_validate(recovered_inc).model_dump(mode="json"),
+                    "type": "incident.recovering",
+                    "incident_id": updated.incident_id,
+                    "incident": IncidentOut.model_validate(updated).model_dump(mode="json"),
                 })
+                _schedule_recovery_confirmation(app, updated.incident_id, msg.received_at)
         if app.state.vigil_notifier is not None:
             try:
                 await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, msg.hostname)
             except Exception:
                 _logger.warning("Failed to resolve vigil incidents for node %s", msg.hostname)
+        if not updated_ids:
+            _logger.debug("Recovery SYSLOG did not match any open incident: node=%s signature=%s", msg.hostname, msg.normalized_signature)
         return
 
     if app.state.maintenance_checker is not None:
@@ -112,7 +124,7 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
     if not incidents:
         return
 
-    open_incidents = await asyncio.to_thread(app.state.store.list_open_active)
+    open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
     for inc in incidents:
         if app.state.maintenance_checker is not None:
             plan = app.state.maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
@@ -156,8 +168,11 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
             continue
 
         merged = app.state.merger.merge(target, inc, graph)
+        merged = app.state.lifecycle.apply_fault(merged, msg, flap_threshold=app.state.recovery_flap_threshold)
         merged.recurrence_count = inc.recurrence_count
         if await asyncio.to_thread(app.state.store.update, merged):
+            event = NotificationEvent.FLAPPING if merged.condition == "FLAPPING" else NotificationEvent.UPDATED
+            await _notify_lifecycle(app, merged, event)
             await app.state.ws_manager.broadcast({
                 "type": "incident.updated",
                 "incident": IncidentOut.model_validate(merged).model_dump(mode="json"),
@@ -169,6 +184,49 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
             if existing.incident_id == target.incident_id:
                 open_incidents[idx] = merged
                 break
+
+
+def _schedule_recovery_confirmation(app: FastAPI, incident_id: str, recovery_seen_at: datetime) -> None:
+    task = app.state.recovery_tasks.pop(incident_id, None)
+    if task is not None:
+        task.cancel()
+    task = asyncio.create_task(_confirm_recovery_after_quiet_period(app, incident_id, recovery_seen_at))
+    app.state.recovery_tasks[incident_id] = task
+
+
+async def _confirm_recovery_after_quiet_period(app: FastAPI, incident_id: str, recovery_seen_at: datetime) -> None:
+    try:
+        await asyncio.sleep(app.state.recovery_quiet_period_sec)
+        incident = await asyncio.to_thread(app.state.store.get_by_id, incident_id)
+        if incident is None or incident.status != "OPEN" or incident.condition != "RECOVERING":
+            return
+        if incident.last_fault_at is not None and incident.last_fault_at > recovery_seen_at:
+            return
+        recovered = app.state.lifecycle.mark_recovered(incident, datetime.now(tz=timezone.utc))
+        if await asyncio.to_thread(app.state.store.update, recovered):
+            await _notify_lifecycle(app, recovered, NotificationEvent.RECOVERED)
+            await app.state.ws_manager.broadcast({
+                "type": "incident.recovered",
+                "incident_id": recovered.incident_id,
+                "incident": IncidentOut.model_validate(recovered).model_dump(mode="json"),
+            })
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        _logger.exception("Error confirming recovered incident %s", incident_id)
+    finally:
+        current = app.state.recovery_tasks.get(incident_id)
+        if current is asyncio.current_task():
+            app.state.recovery_tasks.pop(incident_id, None)
+
+
+async def _notify_lifecycle(app: FastAPI, incident, event: NotificationEvent) -> None:
+    if app.state.vigil_notifier is None:
+        return
+    try:
+        await asyncio.to_thread(app.state.vigil_notifier.send_lifecycle, incident, event)
+    except Exception:
+        _logger.warning("Failed to forward lifecycle event %s for incident %s", event.value, incident.incident_id, exc_info=True)
 
 
 def create_app(
@@ -188,6 +246,8 @@ def create_app(
     window_sec_max: int = 120,
     inference_severity_threshold: int = 5,
     flapping_threshold: int = 3,
+    recovery_quiet_period_sec: float = 30.0,
+    recovery_flap_threshold: int = 2,
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,
@@ -220,6 +280,11 @@ def create_app(
         app.state.ws_manager = ConnectionManager()
         app.state.correlation_mode = correlation_mode
         app.state.merger = IncidentMerger()
+        app.state.lifecycle = IncidentLifecycle()
+        app.state.recovery_matcher = RecoveryMatcher()
+        app.state.recovery_quiet_period_sec = recovery_quiet_period_sec
+        app.state.recovery_flap_threshold = recovery_flap_threshold
+        app.state.recovery_tasks = {}
         app.state.event_classifier = EventClassifier()
         app.state.maintenance_checker = (
             MaintenanceChecker(maintenance_dir) if maintenance_dir else None
@@ -339,6 +404,8 @@ def create_app(
         yield
         consumer.cancel()
         cleanup.cancel()
+        for task in app.state.recovery_tasks.values():
+            task.cancel()
         if transport:
             transport.close()
 

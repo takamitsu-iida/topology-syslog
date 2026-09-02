@@ -33,6 +33,10 @@ class _IncidentRow(_Base):
     condition            = Column(String,   nullable=False, server_default="'ACTIVE'")
     recurrence_count     = Column(Integer,  nullable=False, server_default="0")
     maintenance_plan_id  = Column(String,   nullable=True)
+    last_fault_at        = Column(DateTime, nullable=True)
+    last_recovery_at     = Column(DateTime, nullable=True)
+    flap_count           = Column(Integer,  nullable=False, server_default="0")
+    recovery_evidence    = Column(JSON,     nullable=False, server_default="[]")
 
 
 def _make_engine(database_url: str):
@@ -57,6 +61,10 @@ def _to_row(inc: Incident) -> _IncidentRow:
         condition=inc.condition,
         recurrence_count=inc.recurrence_count,
         maintenance_plan_id=inc.maintenance_plan_id,
+        last_fault_at=inc.last_fault_at.replace(tzinfo=None) if inc.last_fault_at else None,
+        last_recovery_at=inc.last_recovery_at.replace(tzinfo=None) if inc.last_recovery_at else None,
+        flap_count=inc.flap_count,
+        recovery_evidence=inc.recovery_evidence,
     )
 
 
@@ -73,6 +81,10 @@ def _from_row(row: _IncidentRow) -> Incident:
         condition=row.condition or "ACTIVE",
         recurrence_count=int(row.recurrence_count or 0),
         maintenance_plan_id=row.maintenance_plan_id,
+        last_fault_at=row.last_fault_at.replace(tzinfo=timezone.utc) if row.last_fault_at else None,
+        last_recovery_at=row.last_recovery_at.replace(tzinfo=timezone.utc) if row.last_recovery_at else None,
+        flap_count=int(row.flap_count or 0),
+        recovery_evidence=list(row.recovery_evidence or []),
     )
 
 
@@ -90,6 +102,10 @@ class IncidentStore:
                 "ALTER TABLE incidents ADD COLUMN recurrence_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE incidents ADD COLUMN condition TEXT NOT NULL DEFAULT 'ACTIVE'",
                 "ALTER TABLE incidents ADD COLUMN maintenance_plan_id TEXT",
+                "ALTER TABLE incidents ADD COLUMN last_fault_at TIMESTAMP",
+                "ALTER TABLE incidents ADD COLUMN last_recovery_at TIMESTAMP",
+                "ALTER TABLE incidents ADD COLUMN flap_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE incidents ADD COLUMN recovery_evidence JSON DEFAULT '[]'",
             ]:
                 try:
                     conn.execute(text(ddl))
@@ -118,6 +134,10 @@ class IncidentStore:
             row.condition = incident.condition
             row.recurrence_count = incident.recurrence_count
             row.maintenance_plan_id = incident.maintenance_plan_id
+            row.last_fault_at = incident.last_fault_at.replace(tzinfo=None) if incident.last_fault_at else None
+            row.last_recovery_at = incident.last_recovery_at.replace(tzinfo=None) if incident.last_recovery_at else None
+            row.flap_count = incident.flap_count
+            row.recovery_evidence = incident.recovery_evidence
             session.commit()
             return True
 
@@ -153,6 +173,17 @@ class IncidentStore:
                 select(_IncidentRow)
                 .where(_IncidentRow.status == "OPEN")
                 .where(_IncidentRow.condition.in_(["ACTIVE", "FLAPPING"]))
+                .order_by(desc(_IncidentRow.created_at))
+            ).all()
+            return [_from_row(r) for r in rows]
+
+    def list_open_lifecycle(self) -> list[Incident]:
+        """状態遷移中を含め、再発・復旧判定の候補になる OPEN インシデントを返す。"""
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.status == "OPEN")
+                .where(_IncidentRow.condition.in_(["ACTIVE", "DEGRADED", "RECOVERING", "RECOVERED", "FLAPPING"]))
                 .order_by(desc(_IncidentRow.created_at))
             ).all()
             return [_from_row(r) for r in rows]
