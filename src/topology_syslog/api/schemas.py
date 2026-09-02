@@ -38,10 +38,38 @@ class UnknownEventOut(BaseModel):
     severity_counts: dict[str, int]
     nodes: list[str]
     representative_message: str
+    representative_severity: int | None = None
+    classification_candidate: str | None = None
+    recommended_action: str | None = None
 
 
 class UnknownEventListOut(BaseModel):
     events: list[UnknownEventOut]
+    total: int
+
+
+class RawLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    log_id: int
+    received_at: datetime
+    source_ip: str
+    hostname: str
+    facility: int
+    severity: int
+    message: str
+    vendor: str | None = None
+    event_type: str | None = None
+    normalized_signature: str | None = None
+    knowledge_status: str
+    knowledge_id: str | None = None
+    event_classification: str
+    event_action: str | None = None
+    classification_reasons: list[dict[str, object]]
+
+
+class RawLogListOut(BaseModel):
+    logs: list[RawLogOut]
     total: int
 
 

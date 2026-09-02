@@ -18,6 +18,7 @@ from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
 from topology_syslog.api.routes.investigation import router as investigation_router
 from topology_syslog.api.routes.knowledge import router as knowledge_router
+from topology_syslog.api.routes.raw_logs import router as raw_logs_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
@@ -25,9 +26,10 @@ from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAct
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
-from topology_syslog.knowledge.policy import SeverityAction, resolve_severity_action
+from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident, should_skip_inference
 from topology_syslog.persistence.incident_store import IncidentStore
 from topology_syslog.persistence.knowledge_audit_store import KnowledgeAuditStore
+from topology_syslog.persistence.raw_log_store import RawLogStore
 from topology_syslog.persistence.unknown_event_store import UnknownEventStore
 from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
@@ -63,11 +65,13 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
     rule = None
     if matcher is not None:
         rule = matcher.classify(msg)
-        if msg.knowledge_status == "unknown":
-            await asyncio.to_thread(app.state.unknown_event_store.record, msg)
 
-    severity_action = resolve_severity_action(rule, msg.severity)
-    if severity_action == SeverityAction.RETAIN_ONLY:
+    classification_enforced = matcher is not None
+    classification_result = app.state.event_classifier.classify(msg, rule)
+    if matcher is not None and msg.knowledge_status == "unknown":
+        await asyncio.to_thread(app.state.unknown_event_store.record, msg)
+    await asyncio.to_thread(app.state.raw_log_store.record, msg)
+    if should_skip_inference(classification_result):
         _logger.debug("Retaining SYSLOG without inference: signature=%s", msg.normalized_signature)
         return
 
@@ -125,8 +129,13 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
         decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
 
         if decision.action == MergeAction.NEW:
-            if severity_action == SeverityAction.CORRELATE_ONLY:
-                _logger.debug("Suppressing new incident for correlate-only SYSLOG: %s", msg.normalized_signature)
+            if not can_create_new_incident(classification_result, enforce=classification_enforced):
+                _logger.debug(
+                    "Suppressing new incident for non-fault SYSLOG: signature=%s classification=%s action=%s",
+                    msg.normalized_signature,
+                    classification_result.classification.value,
+                    classification_result.action.value if classification_result.action else None,
+                )
                 continue
             await asyncio.to_thread(app.state.store.save, inc)
             if app.state.vigil_notifier is not None:
@@ -194,6 +203,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
+        app.state.raw_log_store = RawLogStore(database_url)
         app.state.knowledge_matcher = None
         app.state.unknown_event_store = None
         app.state.knowledge_audit_store = None
@@ -210,6 +220,7 @@ def create_app(
         app.state.ws_manager = ConnectionManager()
         app.state.correlation_mode = correlation_mode
         app.state.merger = IncidentMerger()
+        app.state.event_classifier = EventClassifier()
         app.state.maintenance_checker = (
             MaintenanceChecker(maintenance_dir) if maintenance_dir else None
         )
@@ -343,6 +354,7 @@ def create_app(
     app.include_router(topology_router)
     app.include_router(filter_router)
     app.include_router(ws_router)
+    app.include_router(raw_logs_router)
     app.include_router(ingest_router)
     app.include_router(ai_router)
     app.include_router(investigation_router)

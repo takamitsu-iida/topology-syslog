@@ -34,6 +34,10 @@
 | Phase 9: 装置調査エージェント | ✅ 完了 | pyATS + LLM ReAct ループ |
 | Phase 10: 即時推論 + 既存インシデント統合 | ✅ 完了 | 10-1〜10-7 実装完了、回帰テスト 78 passed |
 | Phase 11: SYSLOG Knowledge Base (SKB) | ✅ 完了 | 11-1〜11-8 実装完了、SKB 回帰テスト 41 passed |
+| Phase 12: SYSLOG分類レイヤー強化 | ✅ 完了 | 12-1〜12-7 実装完了、Knowledge 回帰テスト 28 passed、frontend build passed |
+| Phase 13: 復旧イベント対応 | ⏳ 未着手 | 障害・復旧・フラッピングをインシデント状態遷移として扱う |
+| Phase 14: 説明可能なRCA + Confidence | ⏳ 未着手 | 根本原因推論の根拠、代替候補、確信度を構造化 |
+| Phase 15: 影響範囲算出 | ⏳ 未着手 | トポロジーから拠点、VLAN、VRF、冗長性への影響を算出 |
 
 ---
 
@@ -53,6 +57,10 @@
 | **Phase 9** | 装置調査エージェント | インシデント発生時に実機へ SSH 接続して情報収集。どの装置にどのコマンドを実行するかを LLM が自律判断する ReAct エージェント | `investigation/` モジュール、`/incidents/{id}/investigation` API | ✅ 完了 |
 | **Phase 10** | 即時推論 + 既存インシデント統合 | 30秒タイムウィンドウ待ちを廃止し、受信ごとに推論・既存インシデントへ統合する | `api/main.py`, `file_ingest.py`, `incident_store.py`, `incident_merger.py` | ✅ 完了 |
 | **Phase 11** | SYSLOG Knowledge Base (SKB) | 既知/未知の SYSLOG を分類し、Severity を含む運用ポリシー、対処手順、承認済み知識を継続的に活用する | `knowledge/` モジュール、SKB YAML/DB、レビュー API/UI | ✅ 完了 |
+| **Phase 12** | SYSLOG分類レイヤー強化 | 常時流れる SYSLOG を保存対象と推論対象へ分離し、ノイズや状態変化を安全に扱う | `knowledge/`, `ingestion/`, `correlation/`, `persistence/raw_log_store.py` | ✅ 完了 |
+| **Phase 13** | 復旧イベント対応 | down/up や established/lost を状態遷移として扱い、インシデントを自動更新・自動クローズする | `correlation/`, `persistence/incident_store.py`, `api/main.py`, UI | ⏳ 未着手 |
+| **Phase 14** | 説明可能なRCA + Confidence | 根本原因判定の根拠、代替候補、確信度を構造化し、API/UI/AIレポートへ展開する | `correlation/root_cause_inferencer.py`, `models.py`, `api/schemas.py`, UI | ⏳ 未着手 |
+| **Phase 15** | 影響範囲算出 | トポロジー属性から影響拠点、VLAN、VRF、BGP peer、冗長性を算出する | `topology/graph_engine.py`, `correlation/`, `api/routes/`, UI | ⏳ 未着手 |
 
 ---
 
@@ -1307,3 +1315,417 @@ confidence: 0.95
 - [x] ルールの承認・無効化・適用履歴を監査できる
 - [x] SKB 未設定時に既存の即時推論・インシデント統合が回帰しない
 - [x] `pytest -q src/tests/test_knowledge.py src/tests/test_api.py src/tests/test_api_ingest.py` がパスする（41 passed）
+
+---
+
+## Phase 12: SYSLOG分類レイヤー強化 ✅ 完了
+
+### 目的
+
+常時 SYSLOG が流れる環境でも、相関エンジンが全ログを障害候補として扱わないようにする。
+受信したログをまず運用上の意味へ分類し、「保存するログ」と「根本原因推論に使うイベント」を分離する。
+
+### 基本方針
+
+```text
+SYSLOG 受信
+  -> RFC / vendor parser
+  -> SKB 正規化・照合
+  -> EventClassifier
+   -> noise: 保存のみ
+   -> retain-only: 保存のみ
+   -> state-change: 状態更新または相関証跡
+   -> fault-signal: インシデント推論対象
+   -> recovery: Phase 13 の復旧処理へ渡す
+   -> config-change: Change / Maintenance 相関へ渡す
+   -> security: 監査・通知ポリシーへ渡す
+  -> Correlation Pipeline
+```
+
+分類は SKB の `classification` / `correlation_role` / `severity_policy` を第一優先にし、未登録 SYSLOG は安全側に倒す。
+未知の高 Severity イベントはレビュー対象として残し、未知の低 Severity イベントは通知せず頻度と代表ログを蓄積する。
+
+### 分類カテゴリ
+
+| カテゴリ | 例 | 推論上の扱い |
+|---|---|---|
+| `noise` | periodic informational message, debug, benign auth notice | 生ログ保存のみ |
+| `retain-only` | 低 Severity の既知イベント | 生ログ保存、未知イベント集計のみ |
+| `state-change` | interface up/down, protocol neighbor state | 状態テーブル更新、条件次第で推論対象 |
+| `fault-signal` | link down, BGP down, PSU failure, fan failure | 根本原因推論対象 |
+| `recovery` | link up, BGP established, HA restored | 既存インシデントの復旧判定へ利用 |
+| `config-change` | config commit, reload, user change | Change / Maintenance と相関 |
+| `security` | login failure, privilege escalation, ACL deny burst | セキュリティ通知または別カテゴリのインシデント |
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 12-1 | A: 分類モデル | `EventClassification`、`EventAction`、分類理由を表すデータモデルを追加する | `models.py`, `knowledge/` | ✅ |
+| 12-2 | B: 分類器 | SKB ルール、Severity、event_type、vendor を使う `EventClassifier` を実装する | `knowledge/classifier.py`, `knowledge/policy.py` | ✅ |
+| 12-3 | C: 推論入口分離 | `fault-signal` のみ新規インシデント候補にし、`state-change` / `config-change` は証跡または補助シグナルとして扱う | `api/main.py`, `correlation/` | ✅ |
+| 12-4 | D: Raw Log 保存方針 | 推論対象外のログも検索・監査できるよう、分類結果付きで保存する | `persistence/raw_log_store.py`, `api/routes/` | ✅ |
+| 12-5 | E: 未知イベント連携 | 未知イベント集約に分類候補、代表 Severity、推奨アクションを追加する | `persistence/unknown_event_store.py`, `api/routes/knowledge.py` | ✅ |
+| 12-6 | F: UI | Knowledge Review 画面で分類カテゴリと推論対象/保存のみをレビューできるようにする | `frontend/src/pages/KnowledgeReview.tsx` | ✅ |
+| 12-7 | G: テスト | 分類、保存のみ、推論対象、未知イベント、既存 SKB 回帰をテストする | `src/tests/test_knowledge.py`, `src/tests/test_api_ingest.py` | ✅ |
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| 既知の低 Severity informational を受信する | `retain-only` として保存され、インシデントは作成されない |
+| 既知の link down を受信する | `fault-signal` として即時推論へ渡される |
+| 既知の link up を受信する | 新規インシデントを作らず `recovery` として Phase 13 の処理へ渡される |
+| 未知の Severity 3 イベントを受信する | 未知イベントとして集約され、要レビュー候補になる |
+| 未知の Severity 6 イベントを大量に受信する | 通知せず頻度・代表ログを更新し、相関エンジンへ流さない |
+
+### 完了条件
+
+- [x] SYSLOG メッセージに分類カテゴリ、分類後アクション、分類理由を保持できる
+- [x] SKB ルール、Severity、event_type、vendor から分類結果を生成できる
+- [x] SYSLOG 受信後に必ず分類結果が付与される
+- [x] `noise` / `retain-only` が新規インシデントを作成しない
+- [x] `fault-signal` だけが根本原因推論の主入力になる
+- [x] 推論対象外ログも分類結果付きで保存・検索できる
+- [x] 未知イベントに分類候補、代表 Severity、推奨アクションを保存・API表示できる
+- [x] 未知イベントレビューで分類カテゴリを選択し、保留ルールへ反映できる
+- [x] 既存の SKB ポリシーと即時推論が回帰しない
+
+### 12-1 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classification_model_defaults_to_unknown src/tests/test_knowledge.py::test_event_classification_result_carries_action_and_reasons
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、12-1 の分類モデルには影響しない。
+
+### 12-2 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classifier_uses_skb_classification_and_severity_policy src/tests/test_knowledge.py::test_event_classifier_falls_back_to_review_for_unknown_message src/tests/test_knowledge.py::test_event_classifier_maps_root_cause_role_to_fault_signal
+```
+
+結果:
+
+- 3 passed
+- 1 warning
+
+API 起動に依存しない Knowledge 周辺の回帰として、以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classification_model_defaults_to_unknown src/tests/test_knowledge.py::test_event_classification_result_carries_action_and_reasons src/tests/test_knowledge.py::test_parser_normalizes_cisco_event_without_severity src/tests/test_knowledge.py::test_matcher_applies_only_approved_rule src/tests/test_knowledge.py::test_matcher_uses_highest_priority_matching_rule src/tests/test_knowledge.py::test_pending_rule_is_not_applied src/tests/test_knowledge.py::test_severity_policy_resolves_individual_and_range_actions src/tests/test_knowledge.py::test_event_classifier_uses_skb_classification_and_severity_policy src/tests/test_knowledge.py::test_event_classifier_falls_back_to_review_for_unknown_message src/tests/test_knowledge.py::test_event_classifier_maps_root_cause_role_to_fault_signal
+```
+
+結果:
+
+- 10 passed
+- 1 warning
+
+### 12-3 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_process_message_skips_non_fault_classification_for_new_incident src/tests/test_knowledge.py::test_process_message_allows_fault_signal_to_create_new_incident src/tests/test_knowledge.py::test_ingest_endpoint_returns_only_created_fault_signal_incidents
+```
+
+結果:
+
+- 3 passed
+- 1 warning
+
+Phase 12 前半の主要回帰として、以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classification_model_defaults_to_unknown src/tests/test_knowledge.py::test_event_classification_result_carries_action_and_reasons src/tests/test_knowledge.py::test_parser_normalizes_cisco_event_without_severity src/tests/test_knowledge.py::test_matcher_applies_only_approved_rule src/tests/test_knowledge.py::test_matcher_uses_highest_priority_matching_rule src/tests/test_knowledge.py::test_pending_rule_is_not_applied src/tests/test_knowledge.py::test_severity_policy_resolves_individual_and_range_actions src/tests/test_knowledge.py::test_event_classifier_uses_skb_classification_and_severity_policy src/tests/test_knowledge.py::test_event_classifier_falls_back_to_review_for_unknown_message src/tests/test_knowledge.py::test_event_classifier_maps_root_cause_role_to_fault_signal src/tests/test_knowledge.py::test_process_message_skips_non_fault_classification_for_new_incident src/tests/test_knowledge.py::test_process_message_allows_fault_signal_to_create_new_incident src/tests/test_knowledge.py::test_ingest_endpoint_returns_only_created_fault_signal_incidents
+```
+
+結果:
+
+- 13 passed
+- 1 warning
+
+### 12-4 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_raw_log_store_records_classification_metadata src/tests/test_knowledge.py::test_ingest_endpoint_stores_non_inferred_raw_logs
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+Phase 12-1〜12-4 の主要回帰として、以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classification_model_defaults_to_unknown src/tests/test_knowledge.py::test_event_classification_result_carries_action_and_reasons src/tests/test_knowledge.py::test_parser_normalizes_cisco_event_without_severity src/tests/test_knowledge.py::test_matcher_applies_only_approved_rule src/tests/test_knowledge.py::test_matcher_uses_highest_priority_matching_rule src/tests/test_knowledge.py::test_pending_rule_is_not_applied src/tests/test_knowledge.py::test_severity_policy_resolves_individual_and_range_actions src/tests/test_knowledge.py::test_event_classifier_uses_skb_classification_and_severity_policy src/tests/test_knowledge.py::test_event_classifier_falls_back_to_review_for_unknown_message src/tests/test_knowledge.py::test_event_classifier_maps_root_cause_role_to_fault_signal src/tests/test_knowledge.py::test_process_message_skips_non_fault_classification_for_new_incident src/tests/test_knowledge.py::test_process_message_allows_fault_signal_to_create_new_incident src/tests/test_knowledge.py::test_ingest_endpoint_returns_only_created_fault_signal_incidents src/tests/test_knowledge.py::test_raw_log_store_records_classification_metadata src/tests/test_knowledge.py::test_ingest_endpoint_stores_non_inferred_raw_logs
+```
+
+結果:
+
+- 15 passed
+- 1 warning
+
+### 12-5 検証結果
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_unknown_event_store_records_classification_candidate_and_recommended_action src/tests/test_knowledge.py::test_unknown_event_api_includes_classification_candidate
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+Phase 12-1〜12-5 の主要回帰として、以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py::test_event_classification_model_defaults_to_unknown src/tests/test_knowledge.py::test_event_classification_result_carries_action_and_reasons src/tests/test_knowledge.py::test_parser_normalizes_cisco_event_without_severity src/tests/test_knowledge.py::test_matcher_applies_only_approved_rule src/tests/test_knowledge.py::test_matcher_uses_highest_priority_matching_rule src/tests/test_knowledge.py::test_pending_rule_is_not_applied src/tests/test_knowledge.py::test_severity_policy_resolves_individual_and_range_actions src/tests/test_knowledge.py::test_event_classifier_uses_skb_classification_and_severity_policy src/tests/test_knowledge.py::test_event_classifier_falls_back_to_review_for_unknown_message src/tests/test_knowledge.py::test_event_classifier_maps_root_cause_role_to_fault_signal src/tests/test_knowledge.py::test_process_message_skips_non_fault_classification_for_new_incident src/tests/test_knowledge.py::test_process_message_allows_fault_signal_to_create_new_incident src/tests/test_knowledge.py::test_ingest_endpoint_returns_only_created_fault_signal_incidents src/tests/test_knowledge.py::test_raw_log_store_records_classification_metadata src/tests/test_knowledge.py::test_ingest_endpoint_stores_non_inferred_raw_logs src/tests/test_knowledge.py::test_unknown_event_store_aggregates_signature_severity_and_nodes src/tests/test_knowledge.py::test_unknown_event_store_records_classification_candidate_and_recommended_action src/tests/test_knowledge.py::test_unknown_event_api_includes_classification_candidate
+```
+
+結果:
+
+- 18 passed
+- 1 warning
+
+### 12-7 検証結果
+
+Knowledge / 分類レイヤーの回帰として以下を実行した。
+
+```bash
+python -m pytest -q src/tests/test_knowledge.py
+```
+
+結果:
+
+- 28 passed
+- 1 warning
+
+フロントエンド UI の回帰として以下も実行した。
+
+```bash
+cd frontend && npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
+
+### 12-6 検証結果
+
+`frontend/src/pages/KnowledgeReview.tsx` と `frontend/src/types.ts` のエラーチェックで問題なし。
+
+フロントエンド全体のビルド確認として以下を実行した。
+
+```bash
+npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
+
+---
+
+## Phase 13: 復旧イベント対応 ⏳ 未着手
+
+### 目的
+
+障害イベントだけでなく復旧イベントを理解し、インシデントの状態を自動更新する。
+単純な `OPEN` / `CLOSED` だけでなく、継続中、部分復旧、復旧確認中、フラッピングを区別する。
+
+### インシデント状態案
+
+| 状態 | 意味 |
+|---|---|
+| `OPEN` | 障害が発生し、まだ復旧シグナルがない |
+| `DEGRADED` | 一部ノードまたは一部サービスのみ復旧していない |
+| `RECOVERING` | 復旧イベントを検知し、静穏確認中 |
+| `RECOVERED` | 復旧条件を満たしたが、履歴として保持中 |
+| `FLAPPING` | down/up が短時間に繰り返されている |
+| `CLOSED` | 自動または手動でクローズ済み |
+
+### 基本方針
+
+1. Phase 12 の `recovery` 分類を受け取り、既存 OPEN インシデントに対応付ける。
+2. root cause node、secondary node、interface、peer、event signature を使って復旧対象を特定する。
+3. 復旧イベント直後に即クローズせず、短い静穏期間を置いて `RECOVERED` または `CLOSED` に遷移する。
+4. 静穏期間中に同種の障害イベントが再発した場合は `FLAPPING` に遷移する。
+5. 手動クローズやメンテナンス自動クローズとの整合性を保つ。
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 13-1 | A: 状態モデル | インシデント状態、復旧対象、最後の障害/復旧時刻、フラップ回数をモデル化する | `models.py`, `persistence/incident_store.py` | ⏳ |
+| 13-2 | B: 復旧マッチング | recovery event を既存インシデントの root / secondary / interface / peer に対応付ける | `correlation/recovery_matcher.py` | ⏳ |
+| 13-3 | C: 状態遷移 | `OPEN`、`RECOVERING`、`RECOVERED`、`FLAPPING` の遷移ルールを実装する | `correlation/incident_lifecycle.py` | ⏳ |
+| 13-4 | D: 静穏確認 | 復旧後の hold-down / quiet period を設定可能にし、再発時はクローズしない | `api/main.py`, `config.py` | ⏳ |
+| 13-5 | E: 通知 | 新規障害、部分復旧、完全復旧、フラッピングで通知種別を分ける | `notification/`, `api/schemas.py` | ⏳ |
+| 13-6 | F: UI | インシデント詳細に状態遷移タイムラインと復旧証跡を表示する | `frontend/src/pages/IncidentDetail.tsx` | ⏳ |
+| 13-7 | G: テスト | 復旧、部分復旧、再発、フラッピング、手動クローズとの競合をテストする | `src/tests/test_incident_store.py`, `src/tests/test_api_ingest.py` | ⏳ |
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| link down 後に同一 interface の link up を受信する | 対象インシデントが `RECOVERING` へ遷移する |
+| quiet period 中に再度 link down を受信する | `OPEN` または `FLAPPING` へ戻り、自動クローズしない |
+| root は復旧したが secondary の BGP down が残る | `DEGRADED` として残り、影響ノードが更新される |
+| BGP down 後に established を受信する | 対応 peer の復旧証跡が追加される |
+| 手動 CLOSED 済みインシデントに復旧イベントが届く | 再オープンせず、監査ログに追記する |
+
+### 完了条件
+
+- [ ] 復旧イベントが新規インシデントを作らない
+- [ ] 復旧イベントが対応する既存インシデントへ証跡として保存される
+- [ ] quiet period 後に自動で `RECOVERED` または `CLOSED` へ遷移できる
+- [ ] 再発時に `FLAPPING` を検知できる
+- [ ] 復旧・再発・手動操作の状態遷移が監査可能である
+- [ ] UI と WebSocket が状態更新をリアルタイム表示できる
+
+---
+
+## Phase 14: 説明可能なRCA + Confidence ⏳ 未着手
+
+### 目的
+
+根本原因推論の結果に、判断根拠、代替候補、確信度を付与する。
+運用者が「なぜこの機器が root cause なのか」を確認でき、AI レポートにも同じ根拠を渡せるようにする。
+
+### RCA Explanation モデル案
+
+```python
+@dataclass
+class RCAEvidence:
+  source: str              # topology | syslog | skb | maintenance | investigation
+  summary: str
+  weight: float
+  related_nodes: list[str]
+  related_log_ids: list[str]
+
+@dataclass
+class RCACandidate:
+  node_id: str
+  confidence: float
+  evidences: list[RCAEvidence]
+  secondary_nodes: list[str]
+  alternative_reason: str | None = None
+```
+
+### 確信度の初期方針
+
+初期実装では ML ではなく、説明しやすいルールベースのスコアにする。
+
+| 要素 | 加点例 |
+|---|---|
+| 自身が `fault-signal` を出している | +0.30 |
+| 下流ノードから関連ログが複数出ている | +0.20 |
+| トポロジー上の ancestor に同時障害ログがない | +0.15 |
+| SKB の knowledge confidence が高い | +0.15 |
+| メンテナンス対象外である | +0.05 |
+| 装置調査で異常状態が確認された | +0.15 |
+
+スコアは 0.0〜1.0 に正規化し、UI では `High` / `Medium` / `Low` のラベルも併記する。
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 14-1 | A: 説明モデル | `RCAEvidence`、`RCACandidate`、`confidence`、`alternative_candidates` をモデル化する | `models.py`, `api/schemas.py` | ⏳ |
+| 14-2 | B: 推論器拡張 | `RootCauseInferencer` が root cause だけでなく候補リストと根拠を返すようにする | `correlation/root_cause_inferencer.py` | ⏳ |
+| 14-3 | C: スコアリング | トポロジー、SKB、Severity、ログ件数、調査結果を使うルールベーススコアを実装する | `correlation/confidence.py` | ⏳ |
+| 14-4 | D: 永続化 | インシデントに RCA explanation JSON を保存し、再評価履歴を残す | `persistence/incident_store.py` | ⏳ |
+| 14-5 | E: API | インシデント詳細 API に根拠、代替候補、confidence を含める | `api/routes/incidents.py`, `api/schemas.py` | ⏳ |
+| 14-6 | F: UI | インシデント詳細に「判定根拠」「代替候補」「確信度」を表示する | `frontend/src/pages/IncidentDetail.tsx`, `frontend/src/components/IncidentCard.tsx` | ⏳ |
+| 14-7 | G: AI連携 | AI 障害レポート生成時に RCA explanation をプロンプトコンテキストへ含める | `ai/report_generator.py` | ⏳ |
+| 14-8 | H: テスト | スコア、根拠、代替候補、APIレスポンス、既存推論回帰をテストする | `src/tests/test_root_cause.py`, `src/tests/test_ai_report.py`, `src/tests/test_api.py` | ⏳ |
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| Spine と複数 Leaf が同時に fault-signal を出す | Spine が High confidence の root cause になる |
+| Leaf だけが単独で障害ログを出す | Leaf が root cause だが confidence は Medium 以下になる |
+| 上流候補が複数ある | alternative candidates に候補と理由が残る |
+| SKB confidence が低い未知イベントを含む | RCA confidence が過剰に高くならない |
+| 装置調査で root cause 候補の異常が確認される | evidence が追加され confidence が上がる |
+
+### 完了条件
+
+- [ ] すべての新規インシデントに `confidence` と RCA explanation が保存される
+- [ ] 根本原因の判断根拠を API で取得できる
+- [ ] 代替候補と採用されなかった理由を確認できる
+- [ ] AI レポートが推論根拠を利用できる
+- [ ] confidence は再評価時に更新履歴を残す
+- [ ] 既存の root cause 判定結果が意図せず変わらない
+
+---
+
+## Phase 15: 影響範囲算出 ⏳ 未着手
+
+### 目的
+
+トポロジーを持つ強みを活かし、根本原因ノードから見た業務影響を自動算出する。
+単に「どの装置がログを出したか」ではなく、「どの拠点、VLAN、VRF、BGP peer、冗長経路、配下ノードに影響し得るか」を提示する。
+
+### 影響範囲モデル案
+
+```python
+@dataclass
+class ImpactScope:
+  root_cause_node: str
+  affected_nodes: list[str]
+  affected_sites: list[str]
+  affected_vlans: list[str]
+  affected_vrfs: list[str]
+  affected_bgp_peers: list[str]
+  redundancy_status: str   # protected | degraded | isolated | unknown
+  blast_radius_score: float
+```
+
+### 基本方針
+
+1. `GraphEngine` にノード属性、リンク属性、レイヤー別依存関係を問い合わせる API を追加する。
+2. root cause node の descendants と関連論理エッジから候補影響範囲を算出する。
+3. 実際にログを出したノードと、トポロジー上影響し得るノードを区別する。
+4. 冗長経路が残っている場合は `degraded`、到達経路が消えた場合は `isolated` とする。
+5. UI では topology map と incident detail の両方で影響範囲を表示する。
+
+### 実装タスク
+
+| # | サブフェーズ | タスク | 対象ファイル | 状態 |
+|---|---|---|---|---|
+| 15-1 | A: 属性モデル | site、role、VLAN、VRF、interface、BGP peer、redundancy group の属性を整理する | `models.py`, `topology/yang_loader.py`, `configs/clos/yang_topology.yaml` | ⏳ |
+| 15-2 | B: グラフ API | descendants、論理 peer、レイヤー依存、代替経路を取得するメソッドを追加する | `topology/graph_engine.py` | ⏳ |
+| 15-3 | C: 影響算出器 | root cause と current condition から `ImpactScope` を生成する | `correlation/impact_analyzer.py` | ⏳ |
+| 15-4 | D: 冗長性判定 | ECMP、MLAG、dual-homing、冗長 BGP peer を考慮して `protected/degraded/isolated` を判定する | `correlation/impact_analyzer.py`, `topology/` | ⏳ |
+| 15-5 | E: 永続化/API | インシデントに impact scope を保存し、API で取得できるようにする | `persistence/incident_store.py`, `api/routes/incidents.py`, `api/schemas.py` | ⏳ |
+| 15-6 | F: UI | IncidentCard と TopologyMap に影響範囲、blast radius、冗長性状態を表示する | `frontend/src/components/IncidentCard.tsx`, `frontend/src/components/TopologyMap.tsx` | ⏳ |
+| 15-7 | G: AI/通知連携 | 通知と AI レポートに影響拠点、配下ノード数、冗長性状態を含める | `notification/`, `ai/report_generator.py` | ⏳ |
+| 15-8 | H: テスト | 単一路、冗長路、BGP peer、VRF/VLAN、属性欠落時のフォールバックをテストする | `src/tests/test_root_cause.py`, `src/tests/test_yang_loader.py`, `src/tests/test_api.py` | ⏳ |
+
+### テストシナリオ
+
+| シナリオ | 期待結果 |
+|---|---|
+| Spine 障害で全 Leaf が配下にある | affected_nodes と affected_sites に配下機器・拠点が入る |
+| dual-homed Leaf の片系 uplink 障害 | redundancy_status が `degraded` になる |
+| 単一路 access switch の uplink 障害 | redundancy_status が `isolated` になる |
+| BGP peer 障害 | affected_bgp_peers と関連 VRF が算出される |
+| VLAN/VRF 属性が欠落している | `unknown` として扱い、影響算出全体は失敗しない |
+
+### 完了条件
+
+- [ ] インシデント作成・更新時に `ImpactScope` が生成される
+- [ ] 影響を受けた実ログノードと、トポロジー上影響し得るノードを区別できる
+- [ ] 拠点、VLAN、VRF、BGP peer の影響範囲を API で取得できる
+- [ ] 冗長性状態を `protected/degraded/isolated/unknown` で表現できる
+- [ ] 通知と AI レポートに影響範囲サマリを含められる
+- [ ] TopologyMap で root cause、実影響、潜在影響を視覚的に区別できる

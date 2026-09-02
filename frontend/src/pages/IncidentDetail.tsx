@@ -50,8 +50,6 @@ export function IncidentDetail() {
   if (isLoading) return <div className="p-4 text-gray-500">読み込み中…</div>
   if (!incident) return <div className="p-4 text-red-500">インシデントが見つかりません</div>
 
-  const isOpen = incident.status === 'OPEN'
-
   const stateBadge = (() => {
     if (incident.status === 'RESOLVED') return { label: '復旧済', cls: 'bg-gray-200 text-gray-600' }
     if (incident.status === 'FLAPPING') return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }

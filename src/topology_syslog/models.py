@@ -2,6 +2,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
+
+
+class EventClassification(StrEnum):
+    UNKNOWN = "unknown"
+    NOISE = "noise"
+    RETAIN_ONLY = "retain-only"
+    STATE_CHANGE = "state-change"
+    FAULT_SIGNAL = "fault-signal"
+    RECOVERY = "recovery"
+    CONFIG_CHANGE = "config-change"
+    SECURITY = "security"
+
+
+class EventAction(StrEnum):
+    RETAIN_ONLY = "retain_only"
+    CORRELATE_ONLY = "correlate_only"
+    CREATE_INCIDENT = "create_incident"
+    UPDATE_INCIDENT = "update_incident"
+    REVIEW = "review"
+    SECURITY_NOTIFY = "security_notify"
+
+
+@dataclass(frozen=True)
+class ClassificationReason:
+    source: str
+    detail: str
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class EventClassificationResult:
+    classification: EventClassification = EventClassification.UNKNOWN
+    action: EventAction | None = None
+    reasons: tuple[ClassificationReason, ...] = ()
 
 
 @dataclass
@@ -20,6 +55,9 @@ class SyslogMessage:
     knowledge_id: str | None = None
     recommended_action: str | None = None
     knowledge_confidence: float | None = None
+    event_classification: EventClassification = EventClassification.UNKNOWN
+    event_action: EventAction | None = None
+    classification_reasons: list[ClassificationReason] = field(default_factory=list)
 
 
 @dataclass
@@ -32,6 +70,28 @@ class UnknownEvent:
     severity_counts: dict[str, int] = field(default_factory=dict)
     nodes: list[str] = field(default_factory=list)
     representative_message: str = ""
+    representative_severity: int | None = None
+    classification_candidate: str | None = None
+    recommended_action: str | None = None
+
+
+@dataclass
+class RawLogRecord:
+    log_id: int
+    received_at: datetime
+    source_ip: str
+    hostname: str
+    facility: int
+    severity: int
+    message: str
+    vendor: str | None = None
+    event_type: str | None = None
+    normalized_signature: str | None = None
+    knowledge_status: str = "unknown"
+    knowledge_id: str | None = None
+    event_classification: str = EventClassification.UNKNOWN.value
+    event_action: str | None = None
+    classification_reasons: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass

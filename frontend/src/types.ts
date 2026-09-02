@@ -90,6 +90,9 @@ export interface UnknownEvent {
   severity_counts: Record<string, number>
   nodes: string[]
   representative_message: string
+  representative_severity: number | null
+  classification_candidate: string | null
+  recommended_action: string | null
 }
 
 export interface UnknownEventListResponse {
@@ -101,14 +104,23 @@ export interface KnowledgeRule {
   rule_id: string
   signature: string
   vendor: string | null
+  classification: string | null
+  correlation_role: string | null
   severity_policy: Record<string, string>
   runbook: string[]
   status: 'approved' | 'pending' | 'disabled'
+  confidence: number | null
+  priority: number
 }
 
 export interface KnowledgeRuleInput {
   rule_id: string
   signature: string
   vendor?: string
+  classification?: string
+  correlation_role?: string
+  severity_policy?: Record<string, string>
   runbook?: string[]
+  confidence?: number
+  priority?: number
 }
