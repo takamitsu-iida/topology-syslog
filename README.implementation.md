@@ -41,7 +41,7 @@
 
 | フェーズ | 名称 | 目的 | 主な成果物 | 状態 |
 |---|---|---|---|---|
-| **Phase 0** | PoC | コアアルゴリズムの動作検証 | `poc/` ディレクトリ一式 | ✅ 完了 |
+| **Phase 0** | PoC | コアアルゴリズムの動作検証 | 初期PoC（削除済み） | ✅ 完了 |
 | **Phase 1** | コアエンジン | 本番品質のログ受信・相関推論 | `src/topology_syslog/` パッケージ | ✅ 完了 |
 | **Phase 2** | ストレージ & API | 永続化層とトポロジー管理API | PostgreSQL スキーマ、FastAPI サーバー | ✅ 完了 |
 | **Phase 3** | 外部統合 | トポロジー同期・通知連携 | NETCONF/RESTCONF アダプター、Notifier | ✅ 完了 |
@@ -64,16 +64,6 @@ topology-syslog/
 ├── README.poc.md
 ├── README.implementation.md    ← 本ファイル
 ├── yang/                       # 既存 YANGモデル (iida-network-model)
-│
-├── poc/                        # Phase 0: 単機能PoC
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── topology/
-│   │   └── l3_topology.json    # RFC 8345準拠 テスト用トポロジー
-│   ├── src/
-│   │   ├── main.py
-│   │   └── requirements.txt
-│   └── test_sender.py
 │
 ├── src/                        # Phase 1+: 本番実装
 │   ├── topology_syslog/        # メインパッケージ
@@ -189,11 +179,11 @@ cd /home/iida/git/topology-syslog && pytest -q src/tests/test_api.py src/tests/t
 
 | # | タスク | 詳細 | 状態 |
 |---|---|---|---|
-| 0-1 | `poc/topology/l3_topology.json` 作成 | `Core-Router1 → Dist-Switch1 → Access-SW1` の3ノードDAGを `iida-network-model` 形式で記述 | ✅ |
-| 0-2 | `poc/src/main.py` 実装 | UDP 514受信 + 10秒ウィンドウ + nx.ancestors、YANGモデル形式トポロジ読み込み対応 | ✅ |
-| 0-3 | `poc/test_sender.py` 作成 | 3機器から連鎖障害ログをUDP送信するシミュレータ | ✅ |
-| 0-4 | `poc/Dockerfile` & `poc/docker-compose.yml` 作成 | python:3.12-slim ベースの単一コンテナ | ✅ |
-| 0-5 | PoC動作確認 | `docker compose up --build` → `test_sender.py` 実行 → 1件のインシデントに集約されることを確認 | ✅ |
+| 0-1 | PoCトポロジ作成 | `Core-Router1 → Dist-Switch1 → Access-SW1` の3ノードDAGを `iida-network-model` 形式で記述 | ✅ |
+| 0-2 | PoCサービス実装 | UDP 514受信、10秒ウィンドウ、祖先探索、YANGモデル形式トポロジ読み込みを検証 | ✅ |
+| 0-3 | PoCログ送信スクリプト作成 | 3機器から連鎖障害ログをUDP送信するシミュレータを検証 | ✅ |
+| 0-4 | PoCコンテナ化 | 単一コンテナでの動作を検証 | ✅ |
+| 0-5 | PoC動作確認 | 1件のインシデントへの集約を確認 | ✅ |
 | 0-6 | ノイズ混入テスト | 無関係な `Branch-Router2` からのログを混入し、2件のインシデントに正しく分離されることを確認 | ✅ |
 
 ### 完了条件
@@ -533,7 +523,7 @@ encoding.codec = "json"
 
 | 項目 | 目標 | 検証方法 |
 |---|---|---|
-| 処理スループット | 10,000 EPS | `test_sender.py` の並列送信版で負荷テスト |
+| 処理スループット | 10,000 EPS | SYSLOG 送信ツールの並列送信で負荷テスト |
 | 推論遅延 | ウィンドウ時間 + 1秒以内 | 送信タイムスタンプ vs. インシデント生成タイムスタンプの差分計測 |
 | メモリ使用量 | 2GB以下 (10,000ノード) | `memory_profiler` で計測 |
 | TLS | Syslog-over-TLS (RFC 5425) 対応 | 自己署名証明書でE2E検証 |

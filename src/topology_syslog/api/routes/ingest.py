@@ -1,6 +1,6 @@
 """シスログ受信 + 根本原因推論 + ストア保存 + WebSocket ブロードキャストを一括処理する。
 
-Vector / test_sender.py からのシスログ行を受け取り、インシデントを生成する。
+Vector などの送信元からのシスログ行を受け取り、インシデントを生成する。
 """
 from __future__ import annotations
 
