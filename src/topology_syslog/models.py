@@ -48,6 +48,40 @@ class EventClassificationResult:
 
 
 @dataclass
+class RCAEvidence:
+    source: str
+    summary: str
+    weight: float
+    related_nodes: list[str] = field(default_factory=list)
+    related_log_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RCACandidate:
+    node_id: str
+    confidence: float
+    evidences: list[RCAEvidence] = field(default_factory=list)
+    secondary_nodes: list[str] = field(default_factory=list)
+    alternative_reason: str | None = None
+
+
+@dataclass
+class RCAExplanation:
+    confidence: float | None = None
+    primary_candidate: RCACandidate | None = None
+    alternative_candidates: list[RCACandidate] = field(default_factory=list)
+
+
+@dataclass
+class RCAEvaluationRecord:
+    evaluation_id: int
+    incident_id: str
+    evaluated_at: datetime
+    reason: str
+    explanation: RCAExplanation
+
+
+@dataclass
 class SyslogMessage:
     received_at: datetime
     source_ip: str
@@ -119,3 +153,4 @@ class Incident:
     last_recovery_at: datetime | None = None
     flap_count: int = 0
     recovery_evidence: list[str] = field(default_factory=list)
+    rca_explanation: RCAExplanation = field(default_factory=RCAExplanation)

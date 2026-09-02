@@ -6,6 +6,44 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class RCAEvidenceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source: str
+    summary: str
+    weight: float
+    related_nodes: list[str]
+    related_log_ids: list[str]
+
+
+class RCACandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    node_id: str
+    confidence: float
+    evidences: list[RCAEvidenceOut]
+    secondary_nodes: list[str]
+    alternative_reason: str | None = None
+
+
+class RCAExplanationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    confidence: float | None = None
+    primary_candidate: RCACandidateOut | None = None
+    alternative_candidates: list[RCACandidateOut]
+
+
+class RCAEvaluationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    evaluation_id: int
+    incident_id: str
+    evaluated_at: datetime
+    reason: str
+    explanation: RCAExplanationOut
+
+
 class IncidentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -24,10 +62,16 @@ class IncidentOut(BaseModel):
     last_recovery_at: datetime | None = None
     flap_count: int = 0
     recovery_evidence: list[str] = []
+    rca_explanation: RCAExplanationOut
 
 
 class IncidentListOut(BaseModel):
     incidents: list[IncidentOut]
+    total: int
+
+
+class RCAHistoryOut(BaseModel):
+    evaluations: list[RCAEvaluationOut]
     total: int
 
 

@@ -1,4 +1,4 @@
-import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
+import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, RCAHistoryResponse, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
 
 /** 開発時は vite.config.ts の proxy が /incidents, /topology, /ws を localhost:8080 へ転送する */
 const BASE = ''
@@ -32,6 +32,9 @@ export const listIncidents = (status?: string): Promise<IncidentListResponse> =>
 
 export const getIncident = (id: string): Promise<Incident> =>
   get<Incident>(`/incidents/${encodeURIComponent(id)}`)
+
+export const getRcaHistory = (id: string): Promise<RCAHistoryResponse> =>
+  get<RCAHistoryResponse>(`/incidents/${encodeURIComponent(id)}/rca-history`)
 
 export const resolveIncident = (id: string): Promise<Incident> =>
   put<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`)

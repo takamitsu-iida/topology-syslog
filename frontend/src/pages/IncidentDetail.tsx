@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { generateAiReport, getIncident, getInvestigation, getSimilarIncidents, getTopologyGraph, startInvestigation } from '../api/client'
+import { generateAiReport, getIncident, getInvestigation, getRcaHistory, getSimilarIncidents, getTopologyGraph, startInvestigation } from '../api/client'
 import { TopologyMap } from '../components/TopologyMap'
 
 function formatDateTime(value: string | null) {
   return value ? new Date(value).toLocaleString('ja-JP') : '-'
+}
+
+function confidenceLabel(value: number | null) {
+  if (value === null) return { text: '-', cls: 'bg-gray-100 text-gray-500' }
+  if (value >= 0.75) return { text: `High ${Math.round(value * 100)}%`, cls: 'bg-emerald-100 text-emerald-700' }
+  if (value >= 0.45) return { text: `Medium ${Math.round(value * 100)}%`, cls: 'bg-amber-100 text-amber-700' }
+  return { text: `Low ${Math.round(value * 100)}%`, cls: 'bg-gray-100 text-gray-600' }
 }
 
 export function IncidentDetail() {
@@ -26,6 +33,12 @@ export function IncidentDetail() {
   const { data: similarData } = useQuery({
     queryKey: ['similar-incidents', id],
     queryFn: () => getSimilarIncidents(id!),
+    enabled: !!id,
+  })
+
+  const { data: rcaHistory } = useQuery({
+    queryKey: ['rca-history', id],
+    queryFn: () => getRcaHistory(id!),
     enabled: !!id,
   })
 
@@ -69,6 +82,9 @@ export function IncidentDetail() {
     { label: '最終障害', value: incident.last_fault_at, tone: 'bg-orange-500' },
     { label: '最終復旧シグナル', value: incident.last_recovery_at, tone: 'bg-emerald-500' },
   ].filter((item) => item.value)
+  const rca = incident.rca_explanation
+  const primaryRca = rca.primary_candidate
+  const rcaConfidence = confidenceLabel(rca.confidence)
 
   return (
     <div className="mx-auto max-w-3xl p-4">
@@ -152,6 +168,76 @@ export function IncidentDetail() {
           </div>
         </div>
       )}
+
+      {/* RCA */}
+      <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-gray-700">RCA 判定根拠</h2>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${rcaConfidence.cls}`}>
+            {rcaConfidence.text}
+          </span>
+        </div>
+        {primaryRca ? (
+          <div className="mt-3 space-y-3">
+            <div className="rounded border bg-gray-50 p-3">
+              <p className="text-xs text-gray-400">根本原因候補</p>
+              <p className="mt-0.5 font-semibold text-gray-800">{primaryRca.node_id}</p>
+            </div>
+            {primaryRca.evidences.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500">判断根拠</p>
+                <ul className="mt-2 space-y-2">
+                  {primaryRca.evidences.map((evidence, index) => (
+                    <li key={`${evidence.source}-${index}`} className="rounded border p-3 text-sm text-gray-700">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{evidence.source}</span>
+                        <span className="text-xs text-gray-400">+{Math.round(evidence.weight * 100)}%</span>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-600">{evidence.summary}</p>
+                      {evidence.related_nodes.length > 0 && (
+                        <p className="mt-1 text-xs text-gray-400">関連ノード: {evidence.related_nodes.join(', ')}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {rca.alternative_candidates.length > 0 && (
+              <div className="border-t pt-3">
+                <p className="text-xs font-semibold text-gray-500">代替候補</p>
+                <div className="mt-2 space-y-2">
+                  {rca.alternative_candidates.map((candidate) => (
+                    <div key={candidate.node_id} className="rounded bg-gray-50 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-gray-700">{candidate.node_id}</span>
+                        <span className="text-xs text-gray-500">{Math.round(candidate.confidence * 100)}%</span>
+                      </div>
+                      {candidate.alternative_reason && <p className="mt-1 text-xs text-gray-500">{candidate.alternative_reason}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {rcaHistory && rcaHistory.evaluations.length > 0 && (
+              <details className="rounded border">
+                <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                  RCA 再評価履歴 ({rcaHistory.total} 件)
+                </summary>
+                <div className="divide-y">
+                  {rcaHistory.evaluations.map((record) => (
+                    <div key={record.evaluation_id} className="p-3 text-xs text-gray-600">
+                      <p><span className="font-medium text-gray-700">{formatDateTime(record.evaluated_at)}</span> / {record.reason}</p>
+                      <p className="mt-1">confidence: {Math.round((record.explanation.confidence ?? 0) * 100)}%</p>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-gray-400">RCA 判定根拠はまだありません。</p>
+        )}
+      </div>
 
       {/* トポロジービュー */}
       {topoGraph && (

@@ -15,6 +15,42 @@ export interface Incident {
   last_recovery_at: string | null
   flap_count: number
   recovery_evidence: string[]
+  rca_explanation: RCAExplanation
+}
+
+export interface RCAEvidence {
+  source: string
+  summary: string
+  weight: number
+  related_nodes: string[]
+  related_log_ids: string[]
+}
+
+export interface RCACandidate {
+  node_id: string
+  confidence: number
+  evidences: RCAEvidence[]
+  secondary_nodes: string[]
+  alternative_reason: string | null
+}
+
+export interface RCAExplanation {
+  confidence: number | null
+  primary_candidate: RCACandidate | null
+  alternative_candidates: RCACandidate[]
+}
+
+export interface RCAEvaluation {
+  evaluation_id: number
+  incident_id: string
+  evaluated_at: string
+  reason: string
+  explanation: RCAExplanation
+}
+
+export interface RCAHistoryResponse {
+  evaluations: RCAEvaluation[]
+  total: number
 }
 
 export interface AiReport {

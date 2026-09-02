@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from topology_syslog.models import Incident
+from topology_syslog.api.schemas import IncidentOut
+from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate
 from topology_syslog.persistence.incident_store import IncidentStore
 
 
@@ -221,6 +222,93 @@ def test_update_persists_incident_lifecycle_fields():
     assert updated.last_recovery_at == incident.last_recovery_at
     assert updated.flap_count == 3
     assert updated.recovery_evidence == ["BGP neighbor established"]
+
+
+def test_save_and_get_persists_rca_explanation():
+    store = _store()
+    incident = _inc()
+    incident.rca_explanation = RCAExplanation(
+        confidence=0.86,
+        primary_candidate=RCACandidate(
+            node_id="Core-Router1",
+            confidence=0.86,
+            evidences=[RCAEvidence(
+                source="topology",
+                summary="Core-Router1 is upstream of affected switches",
+                weight=0.2,
+                related_nodes=["Core-Router1", "Dist-Switch1"],
+                related_log_ids=["1"],
+            )],
+            secondary_nodes=["Dist-Switch1"],
+        ),
+        alternative_candidates=[RCACandidate(
+            node_id="Dist-Switch1",
+            confidence=0.31,
+            alternative_reason="has upstream fault candidate",
+        )],
+    )
+
+    store.save(incident)
+    result = store.get_by_id(incident.incident_id)
+
+    assert result is not None
+    assert result.rca_explanation.confidence == 0.86
+    assert result.rca_explanation.primary_candidate.node_id == "Core-Router1"
+    assert result.rca_explanation.primary_candidate.evidences[0].source == "topology"
+    assert result.rca_explanation.alternative_candidates[0].node_id == "Dist-Switch1"
+
+
+def test_incident_out_includes_rca_explanation():
+    incident = _inc()
+    incident.rca_explanation = RCAExplanation(
+        confidence=0.72,
+        primary_candidate=RCACandidate(
+            node_id="Core-Router1",
+            confidence=0.72,
+            evidences=[RCAEvidence(source="syslog", summary="link down", weight=0.3)],
+        ),
+    )
+
+    payload = IncidentOut.model_validate(incident).model_dump(mode="json")
+
+    assert payload["rca_explanation"]["confidence"] == 0.72
+    assert payload["rca_explanation"]["primary_candidate"]["node_id"] == "Core-Router1"
+    assert payload["rca_explanation"]["primary_candidate"]["evidences"][0]["source"] == "syslog"
+
+
+def test_record_rca_evaluation_updates_current_explanation_and_history():
+    store = _store()
+    incident = _inc()
+    store.save(incident)
+    explanation = RCAExplanation(
+        confidence=0.91,
+        primary_candidate=RCACandidate(
+            node_id="Core-Router1",
+            confidence=0.91,
+            evidences=[RCAEvidence(source="investigation", summary="interface is down", weight=0.15)],
+        ),
+    )
+
+    record = store.record_rca_evaluation(
+        incident.incident_id,
+        explanation,
+        reason="investigation-updated",
+        evaluated_at=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+    )
+    updated = store.get_by_id(incident.incident_id)
+    history = store.list_rca_history(incident.incident_id)
+
+    assert record is not None
+    assert record.reason == "investigation-updated"
+    assert updated.rca_explanation.confidence == 0.91
+    assert len(history) == 1
+    assert history[0].explanation.primary_candidate.evidences[0].source == "investigation"
+
+
+def test_record_rca_evaluation_missing_incident_returns_none():
+    store = _store()
+    assert store.record_rca_evaluation("INC-MISSING", RCAExplanation(confidence=0.1)) is None
+    assert store.list_rca_history("INC-MISSING") == []
 
 
 def test_created_at_tz_preserved():

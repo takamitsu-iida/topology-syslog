@@ -11,7 +11,7 @@ import pytest
 
 from topology_syslog.ai.query_cache import QueryCache, make_fingerprint
 from topology_syslog.ai.report_generator import ReportGenerator
-from topology_syslog.models import Incident
+from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate
 
 
 # ---------------------------------------------------------------------------
@@ -158,3 +158,45 @@ def test_no_similar_incidents_no_similar_section():
 
     prompt_arg = llm.ask.call_args[0][0]
     assert "過去の類似インシデント" not in prompt_arg
+
+
+def test_rca_explanation_included_in_prompt():
+    llm = MagicMock()
+    llm.ask.return_value = "report"
+    cache = QueryCache("sqlite:///:memory:")
+    gen = ReportGenerator(llm, cache, _mock_rag())
+    incident = _inc()
+    incident.rca_explanation = RCAExplanation(
+        confidence=0.65,
+        primary_candidate=RCACandidate(
+            node_id="Spine1",
+            confidence=0.65,
+            evidences=[
+                RCAEvidence(
+                    source="topology",
+                    summary="2 logged node(s) are downstream of Spine1",
+                    weight=0.2,
+                    related_nodes=["Spine1", "Leaf1", "Leaf2"],
+                ),
+                RCAEvidence(
+                    source="syslog",
+                    summary="Spine1 emitted a root-cause candidate syslog message",
+                    weight=0.3,
+                ),
+            ],
+            secondary_nodes=["Leaf1", "Leaf2"],
+        ),
+        alternative_candidates=[RCACandidate(
+            node_id="Leaf1",
+            confidence=0.15,
+            alternative_reason="Leaf1 is downstream of selected root cause Spine1",
+        )],
+    )
+
+    gen.generate(incident)
+
+    prompt_arg = llm.ask.call_args[0][0]
+    assert "RCA 判定コンテキスト" in prompt_arg
+    assert "RCA confidence: 65%" in prompt_arg
+    assert "[topology] +20% 2 logged node(s) are downstream of Spine1" in prompt_arg
+    assert "Leaf1: 15% / Leaf1 is downstream of selected root cause Spine1" in prompt_arg

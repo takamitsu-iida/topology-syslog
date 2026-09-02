@@ -36,7 +36,7 @@
 | Phase 11: SYSLOG Knowledge Base (SKB) | ✅ 完了 | 11-1〜11-8 実装完了、SKB 回帰テスト 41 passed |
 | Phase 12: SYSLOG分類レイヤー強化 | ✅ 完了 | 12-1〜12-7 実装完了、Knowledge 回帰テスト 28 passed、frontend build passed |
 | Phase 13: 復旧イベント対応 | ✅ 完了 | 13-1〜13-7 実装完了、Phase 13 回帰テスト 42 passed、frontend build passed |
-| Phase 14: 説明可能なRCA + Confidence | ⏳ 未着手 | 根本原因推論の根拠、代替候補、確信度を構造化 |
+| Phase 14: 説明可能なRCA + Confidence | ✅ 完了 | 14-1〜14-8 実装完了、Phase 14 回帰テスト 79 passed、frontend build passed |
 | Phase 15: 影響範囲算出 | ⏳ 未着手 | トポロジーから拠点、VLAN、VRF、冗長性への影響を算出 |
 
 ---
@@ -59,7 +59,7 @@
 | **Phase 11** | SYSLOG Knowledge Base (SKB) | 既知/未知の SYSLOG を分類し、Severity を含む運用ポリシー、対処手順、承認済み知識を継続的に活用する | `knowledge/` モジュール、SKB YAML/DB、レビュー API/UI | ✅ 完了 |
 | **Phase 12** | SYSLOG分類レイヤー強化 | 常時流れる SYSLOG を保存対象と推論対象へ分離し、ノイズや状態変化を安全に扱う | `knowledge/`, `ingestion/`, `correlation/`, `persistence/raw_log_store.py` | ✅ 完了 |
 | **Phase 13** | 復旧イベント対応 | down/up や established/lost を状態遷移として扱い、インシデントを自動更新・自動クローズする | `correlation/`, `persistence/incident_store.py`, `api/main.py`, UI | ✅ 完了 |
-| **Phase 14** | 説明可能なRCA + Confidence | 根本原因判定の根拠、代替候補、確信度を構造化し、API/UI/AIレポートへ展開する | `correlation/root_cause_inferencer.py`, `models.py`, `api/schemas.py`, UI | ⏳ 未着手 |
+| **Phase 14** | 説明可能なRCA + Confidence | 根本原因判定の根拠、代替候補、確信度を構造化し、API/UI/AIレポートへ展開する | `correlation/root_cause_inferencer.py`, `models.py`, `api/schemas.py`, UI | ✅ 完了 |
 | **Phase 15** | 影響範囲算出 | トポロジー属性から影響拠点、VLAN、VRF、BGP peer、冗長性を算出する | `topology/graph_engine.py`, `correlation/`, `api/routes/`, UI | ⏳ 未着手 |
 
 ---
@@ -1760,7 +1760,7 @@ cd frontend && npm run build
 
 ---
 
-## Phase 14: 説明可能なRCA + Confidence ⏳ 未着手
+## Phase 14: 説明可能なRoot Cause Analysis + Confidence ✅ 完了
 
 ### 目的
 
@@ -1806,14 +1806,14 @@ class RCACandidate:
 
 | # | サブフェーズ | タスク | 対象ファイル | 状態 |
 |---|---|---|---|---|
-| 14-1 | A: 説明モデル | `RCAEvidence`、`RCACandidate`、`confidence`、`alternative_candidates` をモデル化する | `models.py`, `api/schemas.py` | ⏳ |
-| 14-2 | B: 推論器拡張 | `RootCauseInferencer` が root cause だけでなく候補リストと根拠を返すようにする | `correlation/root_cause_inferencer.py` | ⏳ |
-| 14-3 | C: スコアリング | トポロジー、SKB、Severity、ログ件数、調査結果を使うルールベーススコアを実装する | `correlation/confidence.py` | ⏳ |
-| 14-4 | D: 永続化 | インシデントに RCA explanation JSON を保存し、再評価履歴を残す | `persistence/incident_store.py` | ⏳ |
-| 14-5 | E: API | インシデント詳細 API に根拠、代替候補、confidence を含める | `api/routes/incidents.py`, `api/schemas.py` | ⏳ |
-| 14-6 | F: UI | インシデント詳細に「判定根拠」「代替候補」「確信度」を表示する | `frontend/src/pages/IncidentDetail.tsx`, `frontend/src/components/IncidentCard.tsx` | ⏳ |
-| 14-7 | G: AI連携 | AI 障害レポート生成時に RCA explanation をプロンプトコンテキストへ含める | `ai/report_generator.py` | ⏳ |
-| 14-8 | H: テスト | スコア、根拠、代替候補、APIレスポンス、既存推論回帰をテストする | `src/tests/test_root_cause.py`, `src/tests/test_ai_report.py`, `src/tests/test_api.py` | ⏳ |
+| 14-1 | A: 説明モデル | `RCAEvidence`、`RCACandidate`、`confidence`、`alternative_candidates` をモデル化する | `models.py`, `api/schemas.py` | ✅ |
+| 14-2 | B: 推論器拡張 | `RootCauseInferencer` が root cause だけでなく候補リストと根拠を返すようにする | `correlation/root_cause_inferencer.py` | ✅ |
+| 14-3 | C: スコアリング | トポロジー、SKB、Severity、ログ件数、調査結果を使うルールベーススコアを実装する | `correlation/confidence.py` | ✅ |
+| 14-4 | D: 永続化 | インシデントに RCA explanation JSON を保存し、再評価履歴を残す | `persistence/incident_store.py` | ✅ |
+| 14-5 | E: API | インシデント詳細 API に根拠、代替候補、confidence を含める | `api/routes/incidents.py`, `api/schemas.py` | ✅ |
+| 14-6 | F: UI | インシデント詳細に「判定根拠」「代替候補」「確信度」を表示する | `frontend/src/pages/IncidentDetail.tsx`, `frontend/src/components/IncidentCard.tsx` | ✅ |
+| 14-7 | G: AI連携 | AI 障害レポート生成時に RCA explanation をプロンプトコンテキストへ含める | `ai/report_generator.py` | ✅ |
+| 14-8 | H: テスト | スコア、根拠、代替候補、APIレスポンス、既存推論回帰をテストする | `src/tests/test_root_cause.py`, `src/tests/test_ai_report.py`, `src/tests/test_api.py` | ✅ |
 
 ### テストシナリオ
 
@@ -1827,12 +1827,207 @@ class RCACandidate:
 
 ### 完了条件
 
-- [ ] すべての新規インシデントに `confidence` と RCA explanation が保存される
-- [ ] 根本原因の判断根拠を API で取得できる
-- [ ] 代替候補と採用されなかった理由を確認できる
-- [ ] AI レポートが推論根拠を利用できる
-- [ ] confidence は再評価時に更新履歴を残す
-- [ ] 既存の root cause 判定結果が意図せず変わらない
+- [x] `RCAEvidence`、`RCACandidate`、`RCAExplanation` をモデル化し、インシデントに保持できる
+- [x] 新規インシデントに root cause 候補、判断根拠、代替候補の RCA explanation が付与される
+- [x] すべての新規インシデントにスコアリング済み `confidence` が保存される
+- [x] 根本原因の判断根拠を API で取得できる
+- [x] 代替候補と採用されなかった理由を確認できる
+- [x] UI で判定根拠、代替候補、確信度、再評価履歴を確認できる
+- [x] AI レポートが推論根拠を利用できる
+- [x] confidence は再評価時に更新履歴を残す
+- [x] 既存の root cause 判定結果が意図せず変わらない
+
+### 14-1 検証結果
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py::test_save_and_get_persists_rca_explanation src/tests/test_incident_store.py::test_incident_out_includes_rca_explanation
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+IncidentStore 全体の回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py
+```
+
+結果:
+
+- 18 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-1 のRCA説明モデルには影響しない。
+
+### 14-2 検証結果
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+14-1 / 14-2 の関連回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence src/tests/test_incident_store.py
+```
+
+結果:
+
+- 20 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-2 の推論器拡張には影響しない。
+
+### 14-3 検証結果
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py::test_rca_confidence_scores_topology_and_syslog_evidence src/tests/test_root_cause.py::test_silent_root_confidence_is_medium_but_not_zero
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+14-1〜14-3 の関連回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence src/tests/test_root_cause.py::test_rca_confidence_scores_topology_and_syslog_evidence src/tests/test_root_cause.py::test_silent_root_confidence_is_medium_but_not_zero src/tests/test_incident_store.py
+```
+
+結果:
+
+- 22 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-3 のスコアリングには影響しない。
+
+### 14-4 検証結果
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py::test_record_rca_evaluation_updates_current_explanation_and_history src/tests/test_incident_store.py::test_record_rca_evaluation_missing_incident_returns_none
+```
+
+結果:
+
+- 2 passed
+- 1 warning
+
+14-1〜14-4 の関連回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence src/tests/test_root_cause.py::test_rca_confidence_scores_topology_and_syslog_evidence src/tests/test_root_cause.py::test_silent_root_confidence_is_medium_but_not_zero
+```
+
+結果:
+
+- 24 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-4 のRCA再評価履歴には影響しない。
+
+### 14-5 検証結果
+
+```bash
+python -m pytest -q src/tests/test_api.py::test_get_incident_includes_rca_explanation_without_topology_fixture src/tests/test_api.py::test_get_rca_history_returns_evaluations_without_topology_fixture src/tests/test_api.py::test_get_rca_history_missing_incident_returns_404_without_topology_fixture
+```
+
+結果:
+
+- 3 passed
+- 1 warning
+
+14-1〜14-5 の関連回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_incident_store.py src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence src/tests/test_root_cause.py::test_rca_confidence_scores_topology_and_syslog_evidence src/tests/test_root_cause.py::test_silent_root_confidence_is_medium_but_not_zero src/tests/test_api.py::test_get_incident_includes_rca_explanation_without_topology_fixture src/tests/test_api.py::test_get_rca_history_returns_evaluations_without_topology_fixture src/tests/test_api.py::test_get_rca_history_missing_incident_returns_404_without_topology_fixture
+```
+
+結果:
+
+- 27 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-5 のRCA APIには影響しない。
+
+### 14-6 検証結果
+
+```bash
+cd frontend && npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
+
+### 14-7 検証結果
+
+```bash
+python -m pytest -q src/tests/test_ai_report.py::test_rca_explanation_included_in_prompt
+```
+
+結果:
+
+- 1 passed
+- 1 warning
+
+14-7 の AI レポート全体と RCA 関連回帰として以下も確認した。
+
+```bash
+python -m pytest -q src/tests/test_ai_report.py src/tests/test_incident_store.py src/tests/test_root_cause.py::test_inferencer_attaches_rca_explanation_to_incident src/tests/test_root_cause.py::test_silent_root_rca_explanation_uses_topology_evidence src/tests/test_root_cause.py::test_rca_confidence_scores_topology_and_syslog_evidence src/tests/test_root_cause.py::test_silent_root_confidence_is_medium_but_not_zero
+```
+
+結果:
+
+- 36 passed
+- 1 warning
+
+> warning は Starlette / httpx の非推奨互換警告で、14-7 のAI連携には影響しない。
+
+### 14-8 検証結果
+
+既存の `poc/topology/l3_topology.json` 依存を避けるため、テスト共通フィクスチャを5ノード/3エッジのインメモリトポロジーと一時YAMLへ置き換えた。
+
+主要 API / Root Cause 回帰として以下を確認した。
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py src/tests/test_api.py src/tests/test_api_ingest.py
+```
+
+結果:
+
+- 56 passed
+- 1 warning
+
+Phase 14 全体の回帰として以下を確認した。
+
+```bash
+python -m pytest -q src/tests/test_root_cause.py src/tests/test_incident_store.py src/tests/test_api.py src/tests/test_ai_report.py
+```
+
+結果:
+
+- 79 passed
+- 1 warning
+
+フロントエンド UI の回帰として以下も確認した。
+
+```bash
+cd frontend && npm run build
+```
+
+結果:
+
+- build passed
+- Vite CJS Node API の非推奨警告とチャンクサイズ警告が出るが、ビルド自体は成功
 
 ---
 

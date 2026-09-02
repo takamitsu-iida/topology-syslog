@@ -11,7 +11,8 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 
-from topology_syslog.models import Incident, SyslogMessage
+from topology_syslog.correlation.confidence import score_rca_explanation
+from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate, SyslogMessage
 from topology_syslog.topology.graph_engine import GraphEngine
 
 # BGP エッジを有効化するルーティングプロトコル識別子
@@ -84,6 +85,88 @@ def _find_silent_root_candidates(
     ]
 
 
+def _build_rca_explanation(
+    root_cause_node: str,
+    secondary_nodes: list[str],
+    messages: list[SyslogMessage],
+    graph: GraphEngine,
+    bgp_nodes: frozenset[str],
+    *,
+    silent: bool = False,
+    flapping: bool = False,
+) -> RCAExplanation:
+    evidences: list[RCAEvidence] = []
+    root_log_ids = [str(idx) for idx, msg in enumerate(messages) if msg.hostname == root_cause_node]
+    related_nodes = [root_cause_node, *secondary_nodes]
+
+    if silent:
+        evidences.append(RCAEvidence(
+            source="topology",
+            summary=f"{root_cause_node} is a common upstream ancestor of logged downstream nodes",
+            weight=0.0,
+            related_nodes=related_nodes,
+            related_log_ids=[str(idx) for idx, msg in enumerate(messages) if msg.hostname in secondary_nodes],
+        ))
+    elif flapping:
+        evidences.append(RCAEvidence(
+            source="syslog",
+            summary=f"{root_cause_node} emitted repeated matching events",
+            weight=0.0,
+            related_nodes=[root_cause_node],
+            related_log_ids=root_log_ids,
+        ))
+    else:
+        evidences.append(RCAEvidence(
+            source="syslog",
+            summary=f"{root_cause_node} emitted a root-cause candidate syslog message",
+            weight=0.0,
+            related_nodes=[root_cause_node],
+            related_log_ids=root_log_ids,
+        ))
+
+    if secondary_nodes:
+        evidences.append(RCAEvidence(
+            source="topology",
+            summary=f"{len(secondary_nodes)} logged node(s) are downstream of {root_cause_node}",
+            weight=0.0,
+            related_nodes=related_nodes,
+            related_log_ids=[str(idx) for idx, msg in enumerate(messages) if msg.hostname in secondary_nodes],
+        ))
+
+    upstream_logged = sorted(
+        graph.get_ancestors_filtered(root_cause_node, bgp_nodes).intersection({msg.hostname for msg in messages})
+    )
+    if not upstream_logged and not silent:
+        evidences.append(RCAEvidence(
+            source="topology",
+            summary=f"No logged upstream ancestor was found for {root_cause_node}",
+            weight=0.0,
+            related_nodes=[root_cause_node],
+            related_log_ids=root_log_ids,
+        ))
+
+    primary = RCACandidate(
+        node_id=root_cause_node,
+        confidence=0.0,
+        evidences=evidences,
+        secondary_nodes=secondary_nodes,
+    )
+    alternatives = [
+        RCACandidate(
+            node_id=node,
+            confidence=0.0,
+            secondary_nodes=[],
+            alternative_reason=f"{node} is downstream of selected root cause {root_cause_node}",
+        )
+        for node in secondary_nodes
+    ]
+    return score_rca_explanation(RCAExplanation(
+        confidence=primary.confidence,
+        primary_candidate=primary,
+        alternative_candidates=alternatives,
+    ), messages)
+
+
 class RootCauseInferencer:
     def __init__(
         self,
@@ -154,6 +237,14 @@ class RootCauseInferencer:
                     raw_logs=[m.message for m in node_msgs],
                     status="OPEN",
                     condition="FLAPPING",
+                    rca_explanation=_build_rca_explanation(
+                        node,
+                        [],
+                        node_msgs,
+                        graph,
+                        bgp_nodes,
+                        flapping=True,
+                    ),
                 ))
                 assigned.add(node)
 
@@ -173,6 +264,14 @@ class RootCauseInferencer:
                 raw_log_count=len(related_msgs),
                 raw_logs=[m.message for m in related_msgs],
                 status="OPEN",
+                rca_explanation=_build_rca_explanation(
+                    src,
+                    covered,
+                    related_msgs,
+                    graph,
+                    bgp_nodes,
+                    silent=True,
+                ),
             ))
             assigned.update(covered)
 
@@ -197,6 +296,13 @@ class RootCauseInferencer:
                 raw_log_count=len(related_msgs),
                 raw_logs=[m.message for m in related_msgs],
                 status="OPEN",
+                rca_explanation=_build_rca_explanation(
+                    rc,
+                    secondary,
+                    related_msgs,
+                    graph,
+                    bgp_nodes,
+                ),
             ))
             assigned.add(rc)
             assigned.update(secondary)
@@ -214,6 +320,13 @@ class RootCauseInferencer:
                 raw_log_count=len(node_msgs),
                 raw_logs=[m.message for m in node_msgs],
                 status="OPEN",
+                rca_explanation=_build_rca_explanation(
+                    node,
+                    [],
+                    node_msgs,
+                    graph,
+                    bgp_nodes,
+                ),
             ))
 
         return incidents

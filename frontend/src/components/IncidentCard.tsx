@@ -8,6 +8,11 @@ interface Props {
 
 type StateBadge = { label: string; cls: string }
 
+function confidenceLabel(value: number | null) {
+  if (value === null) return 'RCA -'
+  return `RCA ${Math.round(value * 100)}%`
+}
+
 function getStateBadge(incident: Incident): StateBadge {
   if (incident.condition === 'RECOVERED')
     return { label: '復旧済', cls: 'bg-emerald-100 text-emerald-700' }
@@ -62,6 +67,7 @@ export function IncidentCard({ incident, onResolve }: Props) {
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
         <span>影響ノード: {incident.secondary_nodes.length}</span>
         <span>ログ数: {incident.raw_log_count}</span>
+        <span>{confidenceLabel(incident.rca_explanation.confidence)}</span>
         <span>{new Date(incident.created_at).toLocaleString('ja-JP')}</span>
       </div>
 

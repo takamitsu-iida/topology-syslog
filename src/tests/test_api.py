@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import _process_message_immediately, create_app
 from topology_syslog.config import load_config
-from topology_syslog.models import Incident, SyslogMessage
+from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate, SyslogMessage
 
 
 def _make_inc(
@@ -61,6 +61,64 @@ def test_get_incident_found(client, app):
     resp = client.get("/incidents/INC-20260816-001")
     assert resp.status_code == 200
     assert resp.json()["incident_id"] == "INC-20260816-001"
+
+
+def test_get_incident_includes_rca_explanation_without_topology_fixture():
+    app = create_app(database_url="sqlite:///:memory:", syslog_port=0)
+    with TestClient(app) as client:
+        incident = _make_inc()
+        incident.rca_explanation = RCAExplanation(
+            confidence=0.65,
+            primary_candidate=RCACandidate(
+                node_id="Core-Router1",
+                confidence=0.65,
+                evidences=[RCAEvidence(source="topology", summary="upstream root", weight=0.2)],
+            ),
+        )
+        app.state.store.save(incident)
+
+        response = client.get("/incidents/INC-20260816-001")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["rca_explanation"]["confidence"] == 0.65
+        assert body["rca_explanation"]["primary_candidate"]["node_id"] == "Core-Router1"
+
+
+def test_get_rca_history_returns_evaluations_without_topology_fixture():
+    app = create_app(database_url="sqlite:///:memory:", syslog_port=0)
+    with TestClient(app) as client:
+        incident = _make_inc()
+        app.state.store.save(incident)
+        app.state.store.record_rca_evaluation(
+            incident.incident_id,
+            RCAExplanation(
+                confidence=0.91,
+                primary_candidate=RCACandidate(
+                    node_id="Core-Router1",
+                    confidence=0.91,
+                    evidences=[RCAEvidence(source="investigation", summary="confirmed down", weight=0.15)],
+                ),
+            ),
+            reason="investigation-updated",
+            evaluated_at=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
+        )
+
+        response = client.get("/incidents/INC-20260816-001/rca-history")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        assert body["evaluations"][0]["reason"] == "investigation-updated"
+        assert body["evaluations"][0]["explanation"]["confidence"] == 0.91
+
+
+def test_get_rca_history_missing_incident_returns_404_without_topology_fixture():
+    app = create_app(database_url="sqlite:///:memory:", syslog_port=0)
+    with TestClient(app) as client:
+        response = client.get("/incidents/INC-MISSING/rca-history")
+
+        assert response.status_code == 404
 
 
 def test_get_incident_not_found(client):

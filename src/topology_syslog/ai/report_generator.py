@@ -44,7 +44,31 @@ def _summarize(incident: Incident) -> str:
     lines.append(f"- 関連ログ数: {incident.raw_log_count}")
     for log in incident.raw_logs[:10]:
         lines.append(f"  - {log}")
+    if incident.rca_explanation.primary_candidate is not None:
+        rca = incident.rca_explanation
+        primary = rca.primary_candidate
+        lines.append("")
+        lines.append("## RCA 判定コンテキスト")
+        lines.append(f"- RCA confidence: {_format_confidence(rca.confidence)}")
+        lines.append(f"- 採用候補: {primary.node_id} ({_format_confidence(primary.confidence)})")
+        if primary.evidences:
+            lines.append("- 判断根拠:")
+            for evidence in primary.evidences:
+                lines.append(f"  - [{evidence.source}] +{_format_confidence(evidence.weight)} {evidence.summary}")
+                if evidence.related_nodes:
+                    lines.append(f"    - 関連ノード: {', '.join(evidence.related_nodes)}")
+        if rca.alternative_candidates:
+            lines.append("- 代替候補:")
+            for candidate in rca.alternative_candidates[:5]:
+                reason = f" / {candidate.alternative_reason}" if candidate.alternative_reason else ""
+                lines.append(f"  - {candidate.node_id}: {_format_confidence(candidate.confidence)}{reason}")
     return "\n".join(lines)
+
+
+def _format_confidence(value: float | None) -> str:
+    if value is None:
+        return "unknown"
+    return f"{round(value * 100)}%"
 
 
 class ReportGenerator:

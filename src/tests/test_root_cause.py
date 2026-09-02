@@ -396,3 +396,65 @@ def test_physical_failure_cascades_through_bgp_when_bgp_syslog_present():
     assert len(incidents) == 1
     assert incidents[0].root_cause_node == "Spine1"
     assert set(incidents[0].secondary_nodes) == {"Leaf1", "Leaf2"}
+
+
+def test_inferencer_attaches_rca_explanation_to_incident():
+    engine = _spine_leaf_engine(2)
+    msgs = [
+        _msg("Spine1", "%LINK-3-UPDOWN: Interface down"),
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+        _msg("Leaf2", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+    ]
+
+    incident = RootCauseInferencer().infer(msgs, engine)[0]
+
+    explanation = incident.rca_explanation
+    assert explanation.primary_candidate is not None
+    assert explanation.primary_candidate.node_id == "Spine1"
+    assert explanation.primary_candidate.secondary_nodes == ["Leaf1", "Leaf2"]
+    assert {evidence.source for evidence in explanation.primary_candidate.evidences} >= {"syslog", "topology"}
+    assert {candidate.node_id for candidate in explanation.alternative_candidates} == {"Leaf1", "Leaf2"}
+
+
+def test_silent_root_rca_explanation_uses_topology_evidence():
+    engine = _spine_leaf_engine(2)
+    msgs = [
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+        _msg("Leaf2", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+    ]
+
+    incident = RootCauseInferencer().infer(msgs, engine)[0]
+
+    explanation = incident.rca_explanation
+    assert explanation.primary_candidate is not None
+    assert explanation.primary_candidate.node_id == "Spine1"
+    assert any("common upstream ancestor" in evidence.summary for evidence in explanation.primary_candidate.evidences)
+
+
+def test_rca_confidence_scores_topology_and_syslog_evidence():
+    engine = _spine_leaf_engine(2)
+    msgs = [
+        _msg("Spine1", "%LINK-3-UPDOWN: Interface down"),
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+        _msg("Leaf2", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+    ]
+
+    incident = RootCauseInferencer().infer(msgs, engine)[0]
+    explanation = incident.rca_explanation
+
+    assert explanation.confidence == 0.65
+    assert explanation.primary_candidate.confidence == 0.65
+    assert {evidence.weight for evidence in explanation.primary_candidate.evidences} >= {0.30, 0.20, 0.15}
+
+
+def test_silent_root_confidence_is_medium_but_not_zero():
+    engine = _spine_leaf_engine(2)
+    msgs = [
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+        _msg("Leaf2", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
+    ]
+
+    incident = RootCauseInferencer().infer(msgs, engine)[0]
+
+    assert incident.rca_explanation.confidence == 0.45
+    assert all(candidate.confidence > 0 for candidate in incident.rca_explanation.alternative_candidates)
