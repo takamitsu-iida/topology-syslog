@@ -610,6 +610,34 @@ def test_sample_skb_retain_only_rule_suppresses_legacy_ignore_event():
         assert app.state.store.count() == 0
 
 
+def test_vendor_skb_pack_matches_junos_bgp_down():
+    matcher = KnowledgeMatcher(KnowledgeStore("configs/syslog_knowledge"))
+    message = parse(
+        b"<134>Sep  2 10:00:00 r1 RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 10.0.0.1 changed state to Down",
+        "10.0.0.1",
+    )
+
+    rule = matcher.classify(message)
+
+    assert message.vendor == "juniper-junos"
+    assert rule is not None
+    assert rule.rule_id == "junos-bgp-neighbor-down"
+
+
+def test_vendor_skb_pack_matches_panos_ha_state_change():
+    matcher = KnowledgeMatcher(KnowledgeStore("configs/syslog_knowledge"))
+    message = parse(
+        b"<134>Sep  2 10:00:00 fw1 PAN-OS HA state change from active to passive",
+        "10.0.0.2",
+    )
+
+    rule = matcher.classify(message)
+
+    assert message.vendor == "paloalto-panos"
+    assert rule is not None
+    assert rule.rule_id == "panos-ha-state-change"
+
+
 def test_knowledge_review_creates_approves_and_disables_rule(tmp_path):
     rules_path = tmp_path / "rules.yaml"
     app = create_app(

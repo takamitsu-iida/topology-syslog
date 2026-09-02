@@ -1,0 +1,322 @@
+# Vendor-specific SYSLOG knowledge pack.
+#
+# 目的:
+# - Cisco IOS/NX-OS, Juniper Junos, Arista EOS, Fortinet FortiOS,
+#   Palo Alto PAN-OS, Yamaha RTX, NEC IX, Allied Telesis AW+ の代表的な
+#   ネットワーク障害・復旧・設定変更イベントを SKB で正規化する。
+# - まずは安全な初期ルールとして、障害シグナル / 二次影響 / 復旧 / 保存のみを分類する。
+
+rules:
+  # Cisco IOS / NX-OS -------------------------------------------------------
+  - id: cisco-nxos-ethpm-link-flap
+    description: "Cisco NX-OS の Ethernet ポート状態変化。物理リンク障害の root cause 候補として扱う。"
+    vendor: cisco-ios
+    signature: "%ETHPORT-*-IF_DOWN_*"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interface <interface>"
+      - "show logging last 100 | include <interface>"
+    status: approved
+    confidence: 0.9
+    priority: 95
+
+  - id: cisco-stp-topology-change
+    description: "Cisco の STP トポロジー変更。単独では二次影響または相関証跡として扱う。"
+    vendor: cisco-ios
+    signature: "%SPANTREE-*-TOPO_CHG"
+    classification: stp-topology-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show spanning-tree detail"
+      - "show logging | include SPANTREE"
+    status: approved
+    confidence: 0.85
+    priority: 85
+
+  - id: cisco-lacp-neighbor-down
+    description: "Cisco の LACP 隣接または bundle member 障害。リンク冗長性低下として扱う。"
+    vendor: cisco-ios
+    signature: "%LACP-*-*"
+    classification: lacp-state-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show etherchannel summary"
+      - "show lacp neighbor"
+    status: approved
+    confidence: 0.85
+    priority: 80
+
+  # Juniper Junos ----------------------------------------------------------
+  - id: junos-bgp-neighbor-down
+    description: "Juniper Junos の BGP neighbor down。上流リンクまたは対向装置障害の二次影響として扱う。"
+    vendor: juniper-junos
+    signature: "RPD_BGP_NEIGHBOR_STATE_CHANGED*<ip>*DOWN*"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show bgp summary"
+      - "show route protocol bgp"
+    status: approved
+    confidence: 0.85
+    priority: 90
+
+  - id: junos-link-down
+    description: "Juniper Junos のインターフェース down。物理リンク障害の root cause 候補として扱う。"
+    vendor: juniper-junos
+    signature: "SNMP_TRAP_LINK_DOWN*"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interfaces terse"
+      - "show interfaces extensive <interface>"
+    status: approved
+    confidence: 0.9
+    priority: 95
+
+  - id: junos-commit
+    description: "Juniper Junos の commit 通知。設定変更監査として保存し、インシデントは作成しない。"
+    vendor: juniper-junos
+    signature: "UI_COMMIT*"
+    classification: configuration-change
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    runbook:
+      - "show system commit"
+      - "show configuration | compare rollback 1"
+    status: approved
+    confidence: 0.95
+    priority: 90
+
+  # Arista EOS -------------------------------------------------------------
+  - id: arista-bgp-peer-down
+    description: "Arista EOS の BGP peer down。BGP セッション障害として扱う。"
+    vendor: arista-eos
+    signature: "%BGP-*-ADJCHANGE*DOWN*"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show ip bgp summary"
+      - "show logging | include BGP"
+    status: approved
+    confidence: 0.85
+    priority: 85
+
+  - id: arista-interface-down
+    description: "Arista EOS の interface down。物理リンク障害の root cause 候補として扱う。"
+    vendor: arista-eos
+    signature: "%LINEPROTO-*-UPDOWN*DOWN*"
+    classification: line-protocol-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interfaces status"
+      - "show interfaces <interface> counters errors"
+    status: approved
+    confidence: 0.85
+    priority: 85
+
+  # Fortinet FortiOS -------------------------------------------------------
+  - id: fortios-ha-failover
+    description: "FortiGate HA failover。クラスタ切替イベントとして高優先度で扱う。"
+    vendor: fortinet-fortios
+    signature: "*HA*FAILOVER*"
+    classification: ha-failover
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5-7": correlate_only
+    runbook:
+      - "get system ha status"
+      - "diagnose sys ha status"
+    status: approved
+    confidence: 0.85
+    priority: 95
+
+  - id: fortios-link-monitor-down
+    description: "FortiGate link monitor / interface down。WAN または uplink 障害候補として扱う。"
+    vendor: fortinet-fortios
+    signature: "*LINK*DOWN*"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "get system interface physical"
+      - "diagnose netlink interface list"
+    status: approved
+    confidence: 0.8
+    priority: 80
+
+  # Palo Alto PAN-OS -------------------------------------------------------
+  - id: panos-ha-state-change
+    description: "Palo Alto PAN-OS の HA state change / failover。クラスタ切替として扱う。"
+    vendor: paloalto-panos
+    signature: "*HA*STATE*CHANGE*"
+    classification: ha-failover
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5-7": correlate_only
+    runbook:
+      - "show high-availability state"
+      - "show high-availability all"
+    status: approved
+    confidence: 0.85
+    priority: 95
+
+  - id: panos-bgp-peer-down
+    description: "Palo Alto PAN-OS の BGP peer down。ルーティング障害の相関対象として扱う。"
+    vendor: paloalto-panos
+    signature: "*BGP*PEER*DOWN*"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show routing protocol bgp summary"
+      - "show routing route"
+    status: approved
+    confidence: 0.8
+    priority: 85
+
+  # Yamaha RTX -------------------------------------------------------------
+  - id: yamaha-bgp-down
+    description: "Yamaha RTX の BGP セッション down。拠点ルーターの経路障害として扱う。"
+    vendor: yamaha-rtx
+    signature: "*BGP*DOWN*"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show status bgp neighbor"
+      - "show ip route"
+    status: approved
+    confidence: 0.75
+    priority: 80
+
+  - id: yamaha-tunnel-down
+    description: "Yamaha RTX の IPsec/tunnel down。拠点間 VPN 障害として扱う。"
+    vendor: yamaha-rtx
+    signature: "*TUNNEL*DOWN*"
+    classification: tunnel-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show status tunnel"
+      - "show log"
+    status: approved
+    confidence: 0.75
+    priority: 80
+
+  # NEC IX -----------------------------------------------------------------
+  - id: nec-ix-interface-down
+    description: "NEC IX の interface down。物理またはWANリンク障害として扱う。"
+    vendor: nec-ix
+    signature: "*IF*DOWN*"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interfaces"
+      - "show logging"
+    status: approved
+    confidence: 0.75
+    priority: 75
+
+  - id: nec-ix-bgp-down
+    description: "NEC IX の BGP peer down。経路障害の相関対象として扱う。"
+    vendor: nec-ix
+    signature: "*BGP*DOWN*"
+    classification: bgp-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show ip bgp summary"
+      - "show ip route"
+    status: approved
+    confidence: 0.75
+    priority: 75
+
+  # Allied Telesis AW+ -----------------------------------------------------
+  - id: allied-awplus-link-down
+    description: "Allied Telesis AW+ の interface/link down。アクセスまたは集約リンク障害として扱う。"
+    vendor: allied-telesis-awplus
+    signature: "*INTERFACE*DOWN*"
+    classification: link-state-change
+    correlation_role: root-cause-candidate
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show interface"
+      - "show log"
+    status: approved
+    confidence: 0.75
+    priority: 75
+
+  - id: allied-awplus-stp-topology-change
+    description: "Allied Telesis AW+ の STP topology change。L2障害の二次影響または相関証跡として扱う。"
+    vendor: allied-telesis-awplus
+    signature: "*STP*TOPOLOGY*CHANGE*"
+    classification: stp-topology-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-3": create_incident
+      "4-5": correlate_only
+      "6-7": retain_only
+    runbook:
+      - "show spanning-tree"
+      - "show log | include STP"
+    status: approved
+    confidence: 0.75
+    priority: 75

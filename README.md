@@ -465,7 +465,7 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
 | `MAINTENANCE_DIR` | — | 作業計画 YAML を置くディレクトリ（例: `configs/maintenance`） |
 
-SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。
+SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。`configs/syslog_knowledge/vendor_rules.yaml` には Cisco IOS/NX-OS、Juniper Junos、Arista EOS、Fortinet FortiOS、Palo Alto PAN-OS、Yamaha RTX、NEC IX、Allied Telesis AW+ の代表的なテンプレートを同梱しています。
 
 ---
 

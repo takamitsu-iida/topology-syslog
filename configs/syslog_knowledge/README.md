@@ -10,6 +10,44 @@ SKB_PATH=configs/syslog_knowledge
 
 `SKB_PATH` には単一の `.yaml` / `.yml` ファイル、または YAML ファイルを含むディレクトリを指定できます。ディレクトリ指定時は直下の全 YAML ファイルを読み込みます。ファイルを直接編集した場合は、次の SYSLOG 照合時に変更を検知して再読み込みします。
 
+このディレクトリには初期サンプルの `rules.yaml` に加えて、Cisco IOS/NX-OS、Juniper Junos、Arista EOS、Fortinet FortiOS、Palo Alto PAN-OS、Yamaha RTX、NEC IX、Allied Telesis AW+ 向けの代表的なテンプレートをまとめた `vendor_rules.yaml` も含まれます。
+
+## ルールファイルの使い分け
+
+| ファイル | 役割 | 書くもの |
+|---|---|---|
+| `rules.yaml` | この環境・このプロジェクト固有の運用ルール | 自社ネットワークで確認済みのルール、抑制したいログ、独自 runbook、優先度調整、レビュー UI から作成した保留ルール |
+| `vendor_rules.yaml` | ベンダー別の汎用テンプレート集 | Cisco / Juniper / Arista / Fortinet / Palo Alto / Yamaha / NEC / Allied など、製品一般に通用しそうな代表 SYSLOG |
+
+基本的には、普段の運用で追加・調整するルールは `rules.yaml` に書きます。
+他の環境でも再利用できそうなベンダー共通知識を増やす場合は `vendor_rules.yaml` に書きます。
+
+複数の承認済みルールが同じ SYSLOG に一致した場合は、`priority` が高いルールを優先します。
+そのため、ベンダー汎用ルールは `vendor_rules.yaml` に置き、環境固有の上書きは `rules.yaml` に `priority: 200` など高めの値で書く運用を推奨します。
+
+例: 自社環境では Cisco BGP 隣接断を通常より強く扱いたい場合
+
+```yaml
+- id: local-core-bgp-adjchange-policy
+  vendor: cisco-ios
+  signature: "%BGP-*-ADJCHANGE"
+  classification: bgp-adjacency-change
+  correlation_role: secondary-impact
+  severity_policy:
+    "0-2": page_immediately
+    "3-4": create_incident
+    "5": correlate_only
+    "6-7": retain_only
+  runbook:
+    - "show ip bgp summary"
+    - "社内手順書 NW-BGP-001 を確認"
+  status: approved
+  confidence: 0.95
+  priority: 200
+```
+
+迷った場合は `rules.yaml` に書いてください。運用で安定し、他環境でも使えると判断できたものを `vendor_rules.yaml` に移すのが安全です。
+
 ## 最小構成
 
 ```yaml
