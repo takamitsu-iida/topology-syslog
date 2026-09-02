@@ -20,7 +20,7 @@
 本システム:  障害1件 → アラート 87件 → 自動集約 → インシデント 1件（根本原因: Core-SW1）
 ```
 
-インシデント集約の仕組み上、常時シスログメッセージを受信するような環境には向いてないかもしれません。
+現在は SYSLOG Knowledge Base (SKB) と分類レイヤーにより、常時流れる SYSLOG を「保存のみ」「相関のみ」「新規インシデント候補」「復旧イベント」へ分離します。これにより、すべてのログを根本原因推論へ投入せず、常時ログ環境でもノイズを抑えて運用できます。
 
 <br><br>
 
@@ -33,13 +33,16 @@
 | 機能 | 説明 |
 |---|---|
 | SYSLOG 受信 | UDP (RFC 3164 / RFC 5424) 受信、`/ingest` API 経由での取り込み |
+| **SYSLOG 分類レイヤー** | SKB と Severity ポリシーにより `fault-signal` / `recovery` / `config-change` / `retain-only` などへ分類 |
 | **ファイル取り込み** | rsyslog が書き出したログファイルや `tail -f` パイプからインシデントへ変換 |
 | **根本原因推論** | トポロジーグラフを用いた自動インシデント集約（後述） |
+| **説明可能なRCA** | 根本原因候補、判断根拠、代替候補、confidence をインシデントに保存・表示 |
+| **復旧ライフサイクル** | 復旧 SYSLOG を `RECOVERING` → quiet period 後 `RECOVERED` へ遷移。再障害時は `FLAPPING` |
 | BGP ピアリング対応 | iBGP など物理接続のない論理セッションもグラフエッジとして扱う |
 | リアルタイム通知 | WebSocket でブラウザに即時プッシュ |
 | REST API | インシデント CRUD、トポロジー参照・リロード |
-| Web UI | React + Cytoscape.js によるトポロジービジュアライザー付きダッシュボード |
-| **AI 障害レポート** | OpenAI / Ollama による障害分析レポート生成（RAG + キャッシュ対応） |
+| Web UI | React + Cytoscape.js によるトポロジー、状態遷移、RCA 根拠付きダッシュボード |
+| **AI 障害レポート** | OpenAI / Ollama による障害分析レポート生成（RAG + キャッシュ + RCA 根拠対応） |
 | **装置調査エージェント** | インシデント発生時に pyATS で実機 SSH 接続して状態収集。どの装置に何のコマンドを実行するかを LLM が自律判断 |
 | YANG モデル | `iida-network-model` サブモジュールで物理・L2・L3・管理レイヤーを定義 |
 | **メンテナンス計画** | 作業計画 YAML を読み込み、計画内機器からのインシデントを自動クローズ |
@@ -54,74 +57,45 @@
 
 このシステムの核となる部分です。
 
-### 1. 旧タイムウィンドウ互換レイヤー（非推奨）
+### 1. 現行の集約フロー: 即時相関 + 既存オープンインシデント統合
 
-> 現在の標準動作は 「受信ごとに即時相関・即時統合」 です。旧タイムウィンドウ実装は履歴的な互換レイヤーとしてのみ保持され、通常の運用では使いません。
+現在の実装は、SYSLOG をタイムウィンドウで貯めてまとめて処理する方式ではなく、**受信ごとに即時に相関・統合**します。
 
-旧実装では、受信した SYSLOG はすぐに処理されず、**タイムウィンドウ**（デフォルト 30 秒）に蓄積されます。最初のメッセージが到着してから 30 秒後に、ウィンドウ内の全メッセージをまとめて処理していました。
+処理の流れは次のとおりです。
 
-ただし、この方式は検知遅延とウィンドウ境界での分断が起きるため、現在の設計では「非推奨」かつ「互換のみ」と位置づけています。`CORRELATION_MODE=immediate` を使用し、古い `WINDOW_SEC` 系設定は警告付きで無視されます。
+1. 取り込み
+   - `/ingest` API から受信した SYSLOG、またはファイル取り込み経由のログを `SyslogMessage` に正規化します。
+   - その後、SKB / Severity policy に基づいて `fault-signal` / `recovery` / `config-change` / `retain-only` などに分類します。
 
-```
-t=0s  Spine1: %LINK-3-UPDOWN ─┐
-t=1s  Leaf1:  %BGP-5-ADJCHANGE │ ← 30秒間バッファに溜める
-t=2s  Leaf2:  %BGP-5-ADJCHANGE │
-t=3s  Leaf3:  %BGP-5-ADJCHANGE ─┘
-                                ▼ (t=30s) まとめて根本原因推論
-```
+2. ルート候補の生成
+   - `inferencer.infer([msg], graph)` を呼び、現在のイベントに対して root cause 候補を生成します。
+   - 推論は `logged_nodes` とトポロジー関係を見て、上流に同時障害がないノードを優先候補にします。
 
-#### アダプティブウィンドウ（自動延長）
+3. 既存インシデントとのマージ判定
+   - `IncidentMerger.find_merge_target()` が `list_open_lifecycle()` で取得したオープン中インシデント群を走査し、同じ root cause、祖先/子孫関係、またはトポロジー近傍を見て最適な統合先を決めます。
+   - 実際の判定は次の 4 パターンです。
 
-ネットワーク障害では、障害が連鎖的に伝播し SYSLOG が数秒〜数十秒の間隔で続々と届きます。
-固定長ウィンドウのままでは、後から届いたログが次のウィンドウに落ちて別インシデントに分類されることがあります。
-
-そのため、以下のいずれかの条件が成立した場合、ウィンドウを自動延長します（`WINDOW_EXTEND_FACTOR` 倍、最大 `WINDOW_SEC_MAX` 秒）。
-
-| 条件 | 判定タイミング | 設定変数 |
+| 判定 | 条件 | 実行内容 |
 |---|---|---|
-| バースト検出: `BURST_WINDOW_SEC` 秒以内に `BURST_THRESHOLD` 件以上到着 | `BURST_WINDOW_SEC` 秒ごと | `BURST_THRESHOLD=3` |
-| ルーティングイベント: `%BGP-` / `%OSPF-` / `%ISIS-` / `%EIGRP-` / `%RIP-` を含む | 同上 | （常時有効） |
+| `APPEND` | 既存インシデントの `root_cause_node` と候補が同じ | 既存インシデントへ追記 |
+| `APPEND` | 候補 root が既存 root の子孫関係にある | 既存インシデントの secondary_nodes に追加 |
+| `PROMOTE_ROOT` | 候補 root が既存 root の祖先関係にある | 候補を新しい root に昇格し、旧 root を secondary に退避 |
+| `NEW` | 上記のいずれにも該当しない | 新規インシデントとして保存 |
 
-```
-t=0s   Leaf1: %BGP-5-ADJCHANGE ─┐ ← ウィンドウ開始（30s タイマー）
-t=1s   Leaf3: %BGP-5-ADJCHANGE  │
-                                 │ ← t=5s チェック: BGP イベントあり → 60s に延長
-t=32s  Leaf2: %BGP-5-ADJCHANGE  │ ← 30s 超えでも延長ウィンドウ内
-                                 └── t=60s フラッシュ → 3件まとめて推論 → Spine2 が根本原因
-```
+4. 統合と更新
+   - `merge()` は `raw_logs` を連結し、`secondary_nodes` を重複除去しながら更新し、`condition` は `apply_fault()` / recovery lifecycle で更新します。
+   - これにより、同じ障害で起きた連鎖ログが 1 件のインシデントとして追跡されます。
 
-関連する環境変数:
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `BURST_WINDOW_SEC` | `5.0` | バースト判定の観測窓（秒） |
-| `BURST_THRESHOLD` | `3` | バースト判定の件数しきい値 |
-| `WINDOW_EXTEND_FACTOR` | `2.0` | ウィンドウ延長倍率 |
-| `WINDOW_SEC_MAX` | `120` | ウィンドウ延長の上限（秒） |
-
-#### 現行推奨方式: 即時推論 + 既存インシデント統合
-
-30 秒待ってからまとめて推論する方式は、連鎖障害のログを集約しやすい一方で、検知遅延とウィンドウ境界による分断が避けられません。したがって現行設計では、**受信ごとに即時推論しつつ、既存インシデントへ追加統合する方式**を標準としています。
-
-古いタイムウィンドウ実装は、既存構成の互換性のためだけに残し、実際の相関処理では使わない前提です。
-
-```
-t=0s  Spine1: %LINK-3-UPDOWN      → 即時に Incident A を作成
-t=1s  Leaf1:  %BGP-5-ADJCHANGE    → Incident A の二次影響として追加
-t=2s  Leaf2:  %BGP-5-ADJCHANGE    → Incident A の二次影響として追加
-t=3s  Leaf3:  %BGP-5-ADJCHANGE    → Incident A の二次影響として追加
+```text
+t=0s  Spine1: %LINK-3-UPDOWN      → 新規 Incident A を生成
+ t=1s  Leaf1: %BGP-5-ADJCHANGE    → Incident A に吸収（secondary）
+ t=2s  Leaf2: %BGP-5-ADJCHANGE    → Incident A に吸収（secondary）
+ t=3s  Leaf3: %BGP-5-ADJCHANGE    → Incident A に吸収（secondary）
 ```
 
-候補方式:
+この設計の狙いは、連鎖障害の検知を早くしつつ、**ウィンドウ境界で分断される問題**を避けることです。現行コード上では、`IncidentMerger` と `list_open_lifecycle()` の組み合わせが実際の集約の中心であり、旧タイムウィンドウ実装は互換モードや履歴としてのみ残っています。
 
-| 方式 | 概要 | 長所 | 注意点 |
-|---|---|---|---|
-| 即時推論 + 既存インシデント統合 | 1 件受信するたび推論し、同じ根本原因または上流/下流関係の既存インシデントへ追記する | 検知が早い。ウィンドウ境界で分断されにくい | インシデントの再評価・更新履歴が必要 |
-| トポロジー近傍キュー | ログ発生ノードの上流/下流だけ短期状態として保持し、関連ノードのログだけ統合する | 常時ログが多い環境でも対象を絞れる | グラフ距離・保持 TTL の設計が必要 |
-| 状態機械ベース | ノード/リンク/BGP セッションなどの状態変化を保持し、状態遷移からインシデントを更新する | 復旧イベントやフラッピングと相性がよい | 実装量が増え、状態の期限切れ処理が必要 |
-| 明示的セッション化 | 最初の重大イベントでインシデントを開き、復旧・静穏化・手動クローズで閉じる | 運用者の見え方が自然。長引く障害を追跡しやすい | クローズ条件を誤るとインシデントが残り続ける |
-
-実装方針としては、まず「即時推論 + 既存インシデント統合」を小さく試すのが現実的です。現在の推論器はログ集合を受け取って根本原因候補を計算するため、入口をタイムウィンドウからイベント単位に変え、IncidentStore 側で `root_cause_node` とトポロジー関係を見て既存インシデントへ統合する形にできます。
+> 補足: 単純な `WINDOW_SEC` ベースの集約は `CORRELATION_MODE=time_window` で後方互換的に残っているものの、標準運用では `CORRELATION_MODE=immediate` を使い、`WINDOW_SEC` 系の設定は非推奨です。
 
 ### 2. トポロジーグラフの構築
 
@@ -261,18 +235,19 @@ BGP エッジ（物理接続を持たない論理ピアリング）は、宛先�
 | 値 | 条件 |
 |---|---|
 | `ACTIVE` | 障害継続中（新規生成時のデフォルト） |
-| `RECOVERED` | 復旧 SYSLOG を受信し、ネットワーク的に回復したと判断 |
+| `DEGRADED` | root cause 以外の一部復旧を検知したが、全体復旧ではない |
+| `RECOVERING` | 復旧 SYSLOG を受信し、quiet period 中 |
+| `RECOVERED` | quiet period 中に再障害がなく、ネットワーク的に回復したと判断 |
 | `FLAPPING` | 同一ノード × 同一イベントが 1 ウィンドウ内に N 回以上（デフォルト 3 回） |
 
 > **設計の考え方**: 復旧イベントを受信してもインシデントは自動クローズしません。ネットワークが回復した事実を `condition = RECOVERED` として記録しつつ、インシデント自体は `status = OPEN` のまま残します。オペレーターが確認・対応を完了した後に `CLOSED` にします。
 
 ### 7. 自動復旧検知
 
-> **注意**: 以下の動作は将来変更される可能性があります。
-
-受信した SYSLOG に **復旧イベント** が含まれる場合、該当ノードを根本原因とする `OPEN` インシデントの `condition` を `RECOVERED` に更新します。
+受信した SYSLOG に **復旧イベント** が含まれる場合、該当する `OPEN` インシデントの `condition` を `RECOVERING` に更新します。
 **インシデント自体はクローズされません**（`status` は `OPEN` のまま）。
 復旧イベントは**新規インシデントを生成しません**。
+`RECOVERY_QUIET_PERIOD_SEC` で指定した静穏期間中に再障害がなければ `RECOVERED` へ遷移し、再障害があれば `ACTIVE` または `FLAPPING` に戻ります。
 
 **復旧イベントとみなすパターン:**
 
@@ -295,17 +270,44 @@ BGP エッジ（物理接続を持たない論理ピアリング）は、宛先�
 ウィンドウ2 (t=30-60s):
   Core-Router1: %LINK-3-UPDOWN: ... changed state to up   ← 復旧イベント
     → 新規インシデントは生成しない
-    → INC-xxxx-001 の condition を RECOVERED に更新（status は OPEN のまま）
-    → WebSocket 経由でブラウザに即時反映
+    → INC-xxxx-001 の condition を RECOVERING に更新（status は OPEN のまま）
+    → quiet period 中に再障害がなければ RECOVERED へ更新
+    → WebSocket 経由で incident.recovering / incident.recovered を配信
 ```
 
-**現在の制約（将来変更の可能性あり）:**
+**復旧マッチング:**
 
-- 復旧イベントを出したノードが根本原因（`root_cause_node`）のインシデントのみ `condition` を更新します。二次影響ノードが復旧しても、対応するインシデントの `condition` は変化しません。
-- 復旧判定はパターンマッチング（正規表現）のみで行います。トポロジー情報（どのインターフェースが対応するか）は現在考慮していません。
-- 同一ウィンドウ内にリンクダウンとリンクアップが混在する場合（高速フラッピング）、`condition = FLAPPING` のインシデントが生成されます。
+- root cause node、secondary node、interface、BGP neighbor / peer を使って既存インシデントへ対応付けます。
+- root cause が復旧した場合は `RECOVERING`、secondary や peer だけの復旧では `DEGRADED` として扱います。
+- `RECOVERY_FLAP_THRESHOLD` 回以上の再障害で `FLAPPING` に遷移します。
+- 手動 `CLOSED` 済みインシデントは、遅延復旧イベントで再オープンされません。
 
-### 8. メンテナンス計画による自動クローズ
+### 8. 説明可能な Root Cause Analysis (RCA)
+
+各インシデントには、根本原因の判断理由を構造化した `rca_explanation` が保存されます。
+
+| 項目 | 説明 |
+|---|---|
+| `confidence` | 根本原因判定の確信度（0.0〜1.0） |
+| `primary_candidate` | 採用された根本原因候補 |
+| `evidences` | SYSLOG、トポロジー、SKB、調査結果などの判断根拠 |
+| `alternative_candidates` | 採用されなかった代替候補と理由 |
+
+初期スコアリングは説明しやすいルールベースです。
+
+| 根拠 | 加点例 |
+|---|---|
+| root候補自身が障害SYSLOGを出している | +0.30 |
+| 下流ノードから関連ログが出ている | +0.20 |
+| 上流に同時障害ログがない | +0.15 |
+| サイレントroot causeの共通上流根拠 | +0.25 |
+| フラッピング根拠 | +0.35 |
+
+RCA は Web UI のインシデント詳細画面で確認できます。AI 障害レポートにも RCA confidence、判断根拠、代替候補がプロンプトコンテキストとして渡されます。
+
+RCA 再評価履歴は `GET /incidents/{id}/rca-history` で取得できます。
+
+### 9. メンテナンス計画による自動クローズ
 
 ネットワーク保守作業中は、意図的な操作によって SYSLOG が発出されます。
 `configs/maintenance/` に置いた作業計画 YAML を読み込み、計画の時間枠内・対象機器からのインシデントを自動的に `CLOSED` にします。
@@ -447,12 +449,12 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `BURST_THRESHOLD` | `3` | 旧バースト件数設定。`immediate` モードでは非推奨・未使用 |
 | `WINDOW_EXTEND_FACTOR` | `2.0` | 旧延長倍率設定。`immediate` モードでは非推奨・未使用 |
 | `WINDOW_SEC_MAX` | `120` | 旧延長上限設定。`immediate` モードでは非推奨・未使用 |
+| `RECOVERY_QUIET_PERIOD_SEC` | `30.0` | 復旧イベント後、`RECOVERED` へ遷移する前に再障害を待つ静穏期間（秒） |
+| `RECOVERY_FLAP_THRESHOLD` | `2` | quiet period 前後の再障害で `FLAPPING` とみなす回数 |
 | `DATABASE_URL` | `sqlite:///./incidents.db` | インシデント DB の接続先 |
 | `AI_ENABLED` | `false` | AI レポート機能の有効化 |
 | `LLM_PROVIDER` | `openai` | LLM プロバイダー（`openai` / `ollama`） |
 | `OPENAI_API_KEY` | — | OpenAI API キー（`AI_ENABLED=true` の場合必要） |
-
-SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama のベース URL |
 | `OLLAMA_MODEL` | `llama3` | Ollama のモデル名 |
 | `VIGIL_URL` | — | vigil の URL（設定するとインシデントを転送） |
@@ -462,6 +464,8 @@ SKB のルール記法、Severity ポリシー、レビュー手順は [configs/
 | `INVESTIGATION_MAX_TURNS` | `8` | LLM エージェントの最大ターン数 |
 | `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
 | `MAINTENANCE_DIR` | — | 作業計画 YAML を置くディレクトリ（例: `configs/maintenance`） |
+
+SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。
 
 ---
 
@@ -617,6 +621,7 @@ network-model:
 |---|---|---|
 | `GET` | `/incidents` | インシデント一覧（`?status=OPEN` でフィルタ可） |
 | `GET` | `/incidents/{id}` | インシデント詳細 |
+| `GET` | `/incidents/{id}/rca-history` | RCA 再評価履歴 |
 | `PUT` | `/incidents/{id}/resolve` | インシデントをクローズ |
 | `POST` | `/incidents/{id}/report` | AI 障害レポートを生成（キャッシュあり） |
 | `POST` | `/incidents/{id}/investigation` | 装置調査エージェントを起動（バックグラウンド実行） |
@@ -625,8 +630,11 @@ network-model:
 | `GET` | `/topology/graph` | グラフ全体（Cytoscape.js 形式） |
 | `POST` | `/topology/reload` | トポロジーをファイルから再読み込み |
 | `POST` | `/ingest` | SYSLOG メッセージを直接投入（Vector 連携用） |
+| `GET` | `/raw-logs` | 分類済み Raw SYSLOG を検索（`classification` / `action` / `hostname` などで絞り込み） |
+| `GET` | `/knowledge/rules` | SKB ルール一覧 |
+| `GET` | `/knowledge/unknown-events` | 未知 SYSLOG イベント一覧 |
 | `GET` | `/debug/status` | パイプライン状態確認 |
-| `WS` | `/ws` | リアルタイムインシデント通知 |
+| `WS` | `/ws/incidents` | リアルタイムインシデント通知 |
 
 ---
 
@@ -650,7 +658,7 @@ QueryCache 確認 ── HIT → キャッシュ済みレポートを即返却
 RAGStore で過去の類似インシデントを検索（ChromaDB）
         │
         ▼
-LLM へプロンプト送信（インシデント概要 + 類似事例）
+LLM へプロンプト送信（インシデント概要 + RCA 判定根拠 + 類似事例）
         │
         ▼
 レポートをキャッシュ保存 + RAGStore へ追加
@@ -661,6 +669,8 @@ LLM へプロンプト送信（インシデント概要 + 類似事例）
 
 **キャッシュキー**: 根本原因ノード + Cisco IOS イベント種別（`%FAC-SEV-MNEM`）+ 二次影響ノード集合のハッシュ。
 同じ種別の障害が再発した場合、LLM への問い合わせをスキップして即返却します。
+
+**RCA コンテキスト**: AI レポートには `rca_explanation` の confidence、採用候補、判断根拠、代替候補が渡されます。LLM は推論エンジンの判断を前提情報として使い、根本原因分析の説明を補強します。
 
 **RAG（蓄積型学習）**: 生成したレポートは ChromaDB に蓄積され、次回の類似インシデント分析時の参考情報として使われます。インシデントが蓄積されるほど、レポートの精度が向上します。
 
@@ -853,9 +863,9 @@ topology-syslog と vigil はそれぞれ独立してインシデントを管理
 | 操作 | topology-syslog | vigil |
 |---|---|---|
 | 障害 SYSLOG 受信 | `OPEN` インシデントを生成 | `POST /api/v1/alerts` を受信して triggered |
-| 復旧 SYSLOG 受信 | 自動 `RESOLVED` → **vigil も自動 resolve**（連動） | resolved |
-| topology-syslog で手動 resolve | `RESOLVED` | **同 source の vigil インシデントも resolve**（連動） |
-| vigil で手動 Resolve | **topology-syslog インシデントも resolve**（連動） | resolved |
+| 復旧 SYSLOG 受信 | `RECOVERING` → quiet period 後 `RECOVERED` | `RECOVERED` 時に同 source を resolve |
+| topology-syslog で手動 resolve | `CLOSED` | **同 source の vigil インシデントも resolve**（連動） |
+| vigil で手動 Resolve | 外部連携側で必要に応じて `CLOSED` へ同期 | resolved |
 
 ### Docker Compose での構成例
 
@@ -1026,8 +1036,8 @@ tail -f /var/log/network-syslog.txt | topology-syslog -i
 
 ### インシデントの自動アーカイブ
 
-`RESOLVED` かつ作成から **90 日以上**経過したインシデントは、サーバー起動から 24 時間後に初回削除され、以後 24 時間ごとに自動実行されます。
-`OPEN` / `FLAPPING` のインシデントは削除されません。
+`CLOSED` かつ作成から **90 日以上**経過したインシデントは、サーバー起動から 24 時間後に初回削除され、以後 24 時間ごとに自動実行されます。
+`OPEN` のインシデント（`ACTIVE` / `RECOVERING` / `RECOVERED` / `FLAPPING` を含む）は削除されません。
 
 ### SYSLOG ログの保存上限
 
