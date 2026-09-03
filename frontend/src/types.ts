@@ -68,7 +68,7 @@ export interface CommandResult {
 
 export interface InvestigationReport {
   incident_id: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'interrupted'
   started_at: string
   completed_at: string | null
   summary: string
@@ -138,6 +138,29 @@ export interface UnknownEvent {
 
 export interface UnknownEventListResponse {
   events: UnknownEvent[]
+  total: number
+}
+
+export interface RawLog {
+  log_id: number
+  received_at: string
+  source_ip: string
+  hostname: string
+  facility: number
+  severity: number
+  message: string
+  vendor: string | null
+  event_type: string | null
+  normalized_signature: string | null
+  knowledge_status: string
+  knowledge_id: string | null
+  event_classification: string
+  event_action: string | null
+  classification_reasons: Array<{ source: string; detail: string; confidence: number }>
+}
+
+export interface RawLogListResponse {
+  logs: RawLog[]
   total: number
 }
 

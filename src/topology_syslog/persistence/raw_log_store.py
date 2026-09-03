@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, desc, select
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, delete, desc, select
 from sqlalchemy.orm import Session
 
 from topology_syslog.models import ClassificationReason, RawLogRecord, SyslogMessage
@@ -85,6 +85,21 @@ class RawLogStore:
     def count(self) -> int:
         with Session(self._engine) as session:
             return len(session.scalars(select(_RawLogRow.log_id)).all())
+
+    def count_before(self, before: datetime) -> int:
+        with Session(self._engine) as session:
+            return session.query(_RawLogRow).filter(
+                _RawLogRow.received_at < before.replace(tzinfo=None)
+            ).count()
+
+    def purge_before(self, before: datetime) -> int:
+        """指定日時より前の Raw SYSLOG を削除する。"""
+        with Session(self._engine) as session:
+            result = session.execute(
+                delete(_RawLogRow).where(_RawLogRow.received_at < before.replace(tzinfo=None))
+            )
+            session.commit()
+            return int(result.rowcount or 0)
 
 
 def _reason_to_dict(reason: ClassificationReason) -> dict[str, object]:

@@ -11,6 +11,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from topology_syslog.api.auth import AuthConfig, AuthMiddleware, validate_cors_origins
 from topology_syslog.api.routes.ai import router as ai_router
 from topology_syslog.maintenance.checker import MaintenanceChecker
 from topology_syslog.api.routes.filter import router as filter_router
@@ -31,6 +32,7 @@ from topology_syslog.ingestion.syslog_receiver import start_receiver
 from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident, should_skip_inference
 from topology_syslog.notification.base import NotificationEvent
 from topology_syslog.persistence.incident_store import IncidentStore
+from topology_syslog.persistence.investigation_store import InvestigationStore
 from topology_syslog.persistence.knowledge_audit_store import KnowledgeAuditStore
 from topology_syslog.persistence.raw_log_store import RawLogStore
 from topology_syslog.persistence.unknown_event_store import UnknownEventStore
@@ -63,7 +65,10 @@ def _has_routing_events(buffer: list) -> bool:
     )
 
 
-async def _process_message_immediately(app: FastAPI, msg) -> None:
+async def _process_message_immediately(app: FastAPI, msg) -> list:
+    if app.state.syslog_filter.is_ignored(msg):
+        return []
+
     matcher = app.state.knowledge_matcher
     rule = None
     if matcher is not None:
@@ -76,16 +81,16 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
     await asyncio.to_thread(app.state.raw_log_store.record, msg)
     if should_skip_inference(classification_result):
         _logger.debug("Retaining SYSLOG without inference: signature=%s", msg.normalized_signature)
-        return
+        return []
 
     graph = app.state.graph
     if graph is None:
         _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
-        return
+        return []
 
     if msg.is_recovery:
         if not graph.node_exists(msg.hostname):
-            return
+            return []
         open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
         matches = app.state.recovery_matcher.find_matches(msg, open_incidents)
         updated_ids: set[str] = set()
@@ -110,7 +115,10 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
                 _logger.warning("Failed to resolve vigil incidents for node %s", msg.hostname)
         if not updated_ids:
             _logger.debug("Recovery SYSLOG did not match any open incident: node=%s signature=%s", msg.hostname, msg.normalized_signature)
-        return
+        return [
+            incident for incident in open_incidents
+            if incident.incident_id in updated_ids
+        ]
 
     if app.state.maintenance_checker is not None:
         app.state.maintenance_checker.reload_if_changed()
@@ -119,12 +127,13 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
         incidents = app.state.inferencer.infer([msg], graph)
     except Exception:
         _logger.exception("Error inferring incident from single syslog message")
-        return
+        return []
 
     if not incidents:
-        return
+        return []
 
     open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
+    affected_incidents = []
     for inc in incidents:
         if app.state.maintenance_checker is not None:
             plan = app.state.maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
@@ -160,11 +169,13 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
                 "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
             })
             open_incidents.append(inc)
+            affected_incidents.append(inc)
             continue
 
         target = decision.target
         if target is None:
             await asyncio.to_thread(app.state.store.save, inc)
+            affected_incidents.append(inc)
             continue
 
         merged = app.state.merger.merge(target, inc, graph)
@@ -184,6 +195,9 @@ async def _process_message_immediately(app: FastAPI, msg) -> None:
             if existing.incident_id == target.incident_id:
                 open_incidents[idx] = merged
                 break
+        affected_incidents.append(merged)
+
+    return affected_incidents
 
 
 def _schedule_recovery_confirmation(app: FastAPI, incident_id: str, recovery_seen_at: datetime) -> None:
@@ -259,10 +273,18 @@ def create_app(
     investigation_command_timeout: int = 30,
     maintenance_dir: str | None = None,
     knowledge_path: str | None = None,
+    auth_enabled: bool = False,
+    auth_reader_token: str | None = None,
+    auth_operator_token: str | None = None,
+    auth_admin_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = IncidentStore(database_url)
+        app.state.investigation_store = InvestigationStore(database_url)
+        interrupted = await asyncio.to_thread(app.state.investigation_store.mark_running_as_interrupted)
+        if interrupted:
+            _logger.warning("Marked %d interrupted investigation(s) after restart", interrupted)
         app.state.raw_log_store = RawLogStore(database_url)
         app.state.knowledge_matcher = None
         app.state.unknown_event_store = None
@@ -361,7 +383,6 @@ def create_app(
             _logger.info("AI report generator ready (rag_path=%s)", ai_rag_path)
 
         # 調査エージェント（オプション）— pyats / genie と testbed YAML が必要
-        app.state.investigations: dict = {}
         app.state.investigation_agent = None
         if investigation_enabled:
             from topology_syslog.ai.llm_client import create_llm_client
@@ -409,11 +430,21 @@ def create_app(
         if transport:
             transport.close()
 
+    auth_config = AuthConfig(auth_enabled, {
+        "reader": auth_reader_token,
+        "operator": auth_operator_token,
+        "admin": auth_admin_token,
+    })
     app = FastAPI(title="Topology Syslog Server", version="0.1.0", lifespan=lifespan)
+    cors_origins = validate_cors_origins(auth_enabled, cors_origins)
+    app.add_middleware(
+        AuthMiddleware,
+        config=auth_config,
+    )
     app.add_middleware(
         CORSMiddleware,
         # 開発時は全オリジン許可; 本番では cors_origins で絞ること
-        allow_origins=cors_origins or ["*"],
+        allow_origins=cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

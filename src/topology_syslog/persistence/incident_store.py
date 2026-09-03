@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_engine, desc, select, text
+from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_engine, delete, desc, select, text
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.pool import StaticPool
 
@@ -314,6 +314,29 @@ class IncidentStore:
                 session.delete(row)
             session.commit()
         return count
+
+    def count_closed_before(self, before: datetime) -> int:
+        with Session(self._engine) as session:
+            return session.query(_IncidentRow).filter(
+                _IncidentRow.status == "CLOSED",
+                _IncidentRow.created_at < before.replace(tzinfo=None),
+            ).count()
+
+    def purge_closed_before(self, before: datetime) -> int:
+        """指定日時より前の CLOSED インシデントと RCA 履歴を削除する。"""
+        cutoff = before.replace(tzinfo=None)
+        with Session(self._engine) as session:
+            ids = list(session.scalars(
+                select(_IncidentRow.incident_id)
+                .where(_IncidentRow.status == "CLOSED")
+                .where(_IncidentRow.created_at < cutoff)
+            ))
+            if not ids:
+                return 0
+            session.execute(delete(_RCAEvaluationRow).where(_RCAEvaluationRow.incident_id.in_(ids)))
+            session.execute(delete(_IncidentRow).where(_IncidentRow.incident_id.in_(ids)))
+            session.commit()
+            return len(ids)
 
 
 def _evidence_to_json(evidence: RCAEvidence) -> dict:

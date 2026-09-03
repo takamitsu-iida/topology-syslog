@@ -19,7 +19,7 @@ class CommandResult:
 class InvestigationReport:
     incident_id: str
     started_at: datetime
-    status: str                                    # "running" | "completed" | "failed"
+    status: str                                    # "running" | "completed" | "failed" | "interrupted"
     command_results: list[CommandResult] = field(default_factory=list)
     summary: str = ""
     completed_at: datetime | None = None

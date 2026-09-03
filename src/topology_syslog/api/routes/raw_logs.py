@@ -1,6 +1,8 @@
 """分類済み Raw SYSLOG の検索エンドポイント。"""
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 
 from topology_syslog.api.schemas import RawLogListOut, RawLogOut
@@ -27,3 +29,12 @@ def list_raw_logs(
         knowledge_status=knowledge_status,
     )
     return RawLogListOut(logs=[RawLogOut.model_validate(log) for log in logs], total=len(logs))
+
+
+@router.delete("", response_model=dict[str, int])
+def purge_raw_logs(request: Request, before: datetime, confirm: bool = False) -> dict[str, int]:
+    """指定日時より前の Raw SYSLOG を削除する。"""
+    store = request.app.state.raw_log_store
+    if not confirm:
+        return {"count": store.count_before(before)}
+    return {"count": store.purge_before(before)}

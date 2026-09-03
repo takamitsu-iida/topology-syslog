@@ -258,6 +258,21 @@ def test_raw_log_store_records_classification_metadata():
     assert store.list_logs(classification="config-change")[0].knowledge_id == "config-change"
 
 
+def test_raw_log_store_purge_before_keeps_newer_logs():
+    store = RawLogStore("sqlite:///:memory:")
+    old_message = parse(b"<34>Aug 15 10:00:00 r1 %SYS-5-CONFIG_I: old", "10.0.0.1")
+    new_message = parse(b"<34>Aug 16 10:00:00 r1 %SYS-5-CONFIG_I: new", "10.0.0.1")
+    old_message.received_at = datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc)
+    new_message.received_at = datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc)
+    store.record(old_message)
+    store.record(new_message)
+
+    cutoff = datetime(2026, 8, 16, tzinfo=timezone.utc)
+    assert store.count_before(cutoff) == 1
+    assert store.purge_before(cutoff) == 1
+    assert [log.message for log in store.list_logs()] == [new_message.message]
+
+
 def test_ingest_endpoint_stores_non_inferred_raw_logs(tmp_path):
     rules_path = tmp_path / "rules.yaml"
     rules_path.write_text(

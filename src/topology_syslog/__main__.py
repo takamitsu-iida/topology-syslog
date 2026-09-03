@@ -16,6 +16,8 @@ import os
 import sys
 from pathlib import Path
 
+_logger = logging.getLogger(__name__)
+
 
 def _load_env(path: str = ".env") -> None:
     """シンプルな .env ローダー。既にセット済みの変数は上書きしない。"""
@@ -232,6 +234,10 @@ def main() -> None:
         investigation_command_timeout=int(os.getenv("INVESTIGATION_COMMAND_TIMEOUT", "30")),
         maintenance_dir=os.getenv("MAINTENANCE_DIR") or None,
         knowledge_path=os.getenv("SKB_PATH") or None,
+        auth_enabled=os.getenv("AUTH_ENABLED", "false").lower() == "true",
+        auth_reader_token=os.getenv("AUTH_READER_TOKEN") or None,
+        auth_operator_token=os.getenv("AUTH_OPERATOR_TOKEN") or None,
+        auth_admin_token=os.getenv("AUTH_ADMIN_TOKEN") or None,
     )
 
     uvicorn.run(

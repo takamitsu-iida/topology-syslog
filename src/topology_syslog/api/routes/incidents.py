@@ -72,3 +72,15 @@ def resolve_incident(
     if vigil_notifier is not None and inc is not None:
         background_tasks.add_task(vigil_notifier.resolve_by_source, inc.root_cause_node)
     return IncidentOut.model_validate(inc)
+
+
+@router.delete("/incidents", response_model=dict[str, int])
+def purge_closed_incidents(
+    before: datetime,
+    confirm: bool = False,
+    store: IncidentStore = Depends(_get_store),
+) -> dict[str, int]:
+    """指定日時より前の CLOSED インシデントを削除する。"""
+    if not confirm:
+        return {"count": store.count_closed_before(before)}
+    return {"count": store.purge_closed_before(before)}

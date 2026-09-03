@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from topology_syslog.api.main import create_app
+from topology_syslog.api.main import _process_message_immediately, create_app
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.file_ingest import run_batch
+from topology_syslog.ingestion.syslog_parser import parse
 from topology_syslog.models import Incident
 from topology_syslog.persistence.incident_store import IncidentStore
 
@@ -77,6 +78,79 @@ def test_ingest_incident_id_format(client):
     assert iid.startswith("INC-")
     parts = iid.split("-")
     assert len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit()
+
+
+def test_ingest_uses_immediate_pipeline_to_promote_existing_root_cause(client, app):
+    existing = Incident(
+        incident_id="INC-OLD-001",
+        created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+        root_cause_node="Dist-Switch1",
+        primary_event="%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down",
+        secondary_nodes=["Access-SW1"],
+        raw_log_count=1,
+        raw_logs=["%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down"],
+        status="OPEN",
+    )
+    app.state.store.save(existing)
+
+    response = client.post("/ingest", json={"messages": [
+        {
+            "source_ip": "192.168.1.1",
+            "raw": "<34>Aug 16 10:00:01 Core-Router1 %LINK-3-UPDOWN: Interface GE0/0 down",
+        },
+    ]})
+
+    assert response.status_code == 200
+    assert response.json()[0]["incident_id"] == "INC-OLD-001"
+    merged = app.state.store.get_by_id("INC-OLD-001")
+    assert merged is not None
+    assert merged.root_cause_node == "Core-Router1"
+    assert "Dist-Switch1" in merged.secondary_nodes
+
+
+def test_ingest_uses_immediate_pipeline_for_recovery(client, app):
+    fault = parse(
+        b"<34>Aug 16 10:00:00 Core-Router1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
+        "192.168.1.1",
+    )
+    __import__("asyncio").run(_process_message_immediately(app, fault))
+
+    response = client.post("/ingest", json={"messages": [
+        {
+            "source_ip": "192.168.1.1",
+            "raw": "<34>Aug 16 10:00:01 Core-Router1 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up",
+        },
+    ]})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    incident = app.state.store.get_by_id(response.json()[0]["incident_id"])
+    assert incident is not None
+    assert incident.condition == "RECOVERING"
+
+
+def test_udp_and_ingest_produce_equivalent_incident_state(poc_topology_file):
+    udp_app = create_app(
+        database_url="sqlite:///:memory:", topology_path=poc_topology_file,
+        topology_source="iida-yaml", syslog_port=0,
+    )
+    api_app = create_app(
+        database_url="sqlite:///:memory:", topology_path=poc_topology_file,
+        topology_source="iida-yaml", syslog_port=0,
+    )
+    with TestClient(udp_app), TestClient(api_app) as api_client:
+        for item in _CHAIN_MSGS:
+            message = parse(item["raw"].encode(), item["source_ip"])
+            __import__("asyncio").run(_process_message_immediately(udp_app, message))
+        response = api_client.post("/ingest", json={"messages": _CHAIN_MSGS})
+
+    assert response.status_code == 200
+    udp_incidents = udp_app.state.store.list_incidents()
+    api_incidents = api_app.state.store.list_incidents()
+    assert len(udp_incidents) == len(api_incidents) == 1
+    assert udp_incidents[0].root_cause_node == api_incidents[0].root_cause_node
+    assert udp_incidents[0].secondary_nodes == api_incidents[0].secondary_nodes
+    assert udp_incidents[0].raw_log_count == api_incidents[0].raw_log_count
 
 
 # ---- WebSocket ----------------------------------------------------------

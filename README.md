@@ -464,6 +464,11 @@ AIによるレポート生成やCMLを使った検証環境を作成するには
 | `INVESTIGATION_MAX_TURNS` | `8` | LLM エージェントの最大ターン数 |
 | `INVESTIGATION_COMMAND_TIMEOUT` | `30` | SSH コマンドタイムアウト（秒） |
 | `MAINTENANCE_DIR` | — | 作業計画 YAML を置くディレクトリ（例: `configs/maintenance`） |
+| `AUTH_ENABLED` | `false` | Bearer トークン認証を有効化。Docker Compose では常に `true` |
+| `AUTH_READER_TOKEN` | — | 閲覧専用トークン。GET と WebSocket を許可 |
+| `AUTH_OPERATOR_TOKEN` | — | reader 権限に加え、取込、解決、再読込、AI レポート生成を許可 |
+| `AUTH_ADMIN_TOKEN` | — | 全権限。削除、SKB 更新、実機調査の開始を許可 |
+| `CORS_ORIGINS` | `*` | 許可する UI オリジンのカンマ区切り。認証有効時は明示指定が必須 |
 
 SKB のルール記法、Severity ポリシー、レビュー手順は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照してください。`configs/syslog_knowledge/vendor_rules.yaml` には Cisco IOS/NX-OS、Juniper Junos、Arista EOS、Fortinet FortiOS、Palo Alto PAN-OS、Yamaha RTX、NEC IX、Allied Telesis AW+ の代表的なテンプレートを同梱しています。
 
@@ -509,10 +514,19 @@ docker compose up --build -d
 
 初回は Python パッケージ・npm ビルドのダウンロードが走るため数分かかります。
 
+Docker Compose では認証が必須です。`.env` に少なくとも管理用トークンを設定し、UI の「アクセストークン」欄へ入力してください。
+
+```bash
+AUTH_ADMIN_TOKEN="replace-with-a-long-random-secret"
+# 必要に応じて閲覧・運用用のトークンを追加
+AUTH_READER_TOKEN="replace-with-reader-secret"
+AUTH_OPERATOR_TOKEN="replace-with-operator-secret"
+```
+
 起動後:
 
 - Web UI: http://localhost:3000
-- API ドキュメント: http://localhost:8080/docs
+- API は Web UI と同じオリジンを経由します。認証付き API の直接利用には `Authorization: Bearer <token>` ヘッダーを指定してください。
 
 **3. ログを確認する**
 
@@ -541,6 +555,58 @@ docker compose down
 ports:
   - "514:1514/udp"   # ホストの 514 → コンテナの 1514
 ```
+
+---
+
+## 共有環境への導入と運用
+
+### 導入手順
+
+1. `configs/clos/yang_topology.yaml` の `device-id` を、各ネットワーク機器が SYSLOG に出力するホスト名と一致させます。
+2. `.env.example` を `.env` へコピーし、Docker Compose 用に少なくとも `AUTH_ADMIN_TOKEN` を十分に長いランダム値へ変更します。トークンはリポジトリにコミットしません。
+3. 必要に応じて `AUTH_READER_TOKEN` と `AUTH_OPERATOR_TOKEN` を設定し、利用者ごとに配布します。トークンを失効させる場合は値を変更して `docker compose up -d` で再作成します。
+4. `make docker-up` を実行し、`http://localhost:3000` を開きます。画面上部のアクセストークン欄へ、利用目的に対応するトークンを入力します。
+5. 機器または SYSLOG 集約サーバーからホストの `1514/udp` へ送信し、インシデント一覧、Raw SYSLOG、Knowledge Review が表示されることを確認します。
+
+Docker Compose ではバックエンドの HTTP ポートを外部公開しません。REST API と WebSocket は UI と同一オリジンの proxy (`http://localhost:3000`) を経由します。
+
+### 権限とトークン管理
+
+| ロール | トークン | 許可される操作 |
+|---|---|---|
+| reader | `AUTH_READER_TOKEN` | インシデント、トポロジー、Raw SYSLOG、SKB の参照、WebSocket 受信 |
+| operator | `AUTH_OPERATOR_TOKEN` | reader 権限に加え、`/ingest`、インシデント解決、トポロジー/フィルター再読込、AI レポート生成 |
+| admin | `AUTH_ADMIN_TOKEN` | 全権限。データ削除、SKB ルール変更、実機調査の開始を含む |
+
+- UI に入力したトークンはブラウザの session storage にのみ保存され、タブまたはブラウザを閉じると消去されます。
+- API を自動化から呼ぶ場合は `Authorization: Bearer <token>` ヘッダーを付けます。WebSocket は `access_token` クエリパラメーターを使用します。
+- `AUTH_ENABLED=true` では、少なくとも1つのトークンと、ワイルドカードを含まない `CORS_ORIGINS` が必要です。Docker Compose はこの設定を強制します。
+
+### 日常運用
+
+| 作業 | 確認・操作 |
+|---|---|
+| 受信状態の確認 | admin または reader トークンで `GET /debug/status` を実行し、`syslog_recv_count` と `incident_count` を確認する |
+| インシデント対応 | UI で RCA 根拠、関連ログ、状態遷移を確認し、対応完了後に operator 権限で解決する |
+| トポロジー更新 | `yang_topology.yaml` を更新後、operator 権限でトポロジーを再読込する。変更前に YAML の妥当性と機器ホスト名を確認する |
+| SKB 更新 | Knowledge Review で保留ルールを確認し、内容をレビューしてから admin 権限で承認する。詳細は [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) を参照する |
+| データ保全 | Docker ボリューム `data` をバックアップする。`docker compose down -v` はインシデント DB と RAG データを削除するため、通常の停止では使用しない |
+| 調査の確認 | 実機調査の結果とコマンド出力は DB に保存される。再起動で実行中だった調査は `interrupted` となり、自動再開しない |
+
+`POST /ingest`、UDP 受信、ファイル/標準入力取込はいずれも同じ分類・相関・復旧・通知の処理規則を使用します。`/ingest` の一括応答には、新規作成、統合更新、または復旧で影響を受けた最終インシデントが返ります。
+
+### 継続的検証
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) は push と pull request ごとに Python テスト、フロントエンドのクリーンインストールと本番ビルド、Docker Compose の起動を実行します。Compose の smoke test では、未認証アクセスの拒否と、認証済み UI proxy 経由のインシデント、トポロジー、フィルター、Raw SYSLOG、SKB API を確認します。
+
+### 既知の制約
+
+- 根本原因推論は定義済みトポロジーと SYSLOG の送信ホスト名が一致することを前提とします。未知のホストは Raw SYSLOG として保存されますが、トポロジー相関の対象にはなりません。
+- 即時相関は、同一の root cause またはトポロジー上の祖先・子孫関係を持つ OPEN インシデントを統合します。完全に独立した障害を因果関係として判定する機能や、影響拠点・VLAN・VRF・冗長経路の算出は未実装です。
+- SYSLOG は UDP 受信です。UDP の配送保証、順序保証、TLS 暗号化は提供しません。要件がある環境では、TLS 対応のログ集約基盤を前段に置き、`/ingest` またはファイル取込で連携してください。
+- Docker Compose の `configs` は読み取り専用です。UI/API から SKB ルールを保存する場合は、書き込み可能な `SKB_PATH` を別ボリュームへ設定してください。
+- 調査結果は永続化されますが、サーバー再起動で中断した実機調査を自動再開しません。`interrupted` を確認してから明示的に再調査してください。
+- AI レポートと実機調査は、外部 LLM または対象装置へデータを送信します。有効化前に、送信する SYSLOG・コマンド出力・認証情報の取り扱い方針を確認してください。
 
 ---
 

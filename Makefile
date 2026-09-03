@@ -160,7 +160,7 @@ docker-up:
 	docker compose up --build -d
 	@echo ""
 	@echo "  UI  : http://localhost:3000"
-	@echo "  API : http://localhost:8080/docs"
+	@echo "  API は UI の同一オリジン proxy 経由で利用します"
 
 docker-down:
 	docker compose down

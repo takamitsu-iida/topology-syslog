@@ -16,6 +16,8 @@ services:
       TOPOLOGY_PATH: "configs/clos/yang_topology.yaml"
       TOPOLOGY_SOURCE: "iida-yaml"
       SKB_PATH: "configs/syslog_knowledge"
+      AUTH_ENABLED: "true"
+      CORS_ORIGINS: "http://localhost:3000"
     volumes:
       - ./configs:/app/configs:ro  # トポロジー定義（読み取り専用）
       - data:/data                  # incidents.db と .chromadb を永続化

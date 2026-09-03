@@ -6,34 +6,33 @@ import pytest
 from topology_syslog.topology.yang_loader import TopologyLoader
 
 _ROOT = Path(__file__).parent.parent.parent
-POC_JSON = str(_ROOT / "poc" / "topology" / "l3_topology.json")
+CLOS_YAML = str(_ROOT / "configs" / "clos" / "yang_topology.yaml")
 SMALL_YAML = str(_ROOT / "yang" / "examples" / "sample_topology_small.yaml")
 
 
-def test_json_nodes_exist():
-    g = TopologyLoader().load_from_iida_json(POC_JSON)
-    for node in ("Core-Router1", "Dist-Switch1", "Access-SW1", "Branch-Router2", "Branch-Access-SW1"):
+def test_clos_nodes_exist():
+    g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
+    for node in ("Spine1", "Spine2", "Leaf1", "Leaf2", "Leaf3"):
         assert node in g.nodes
 
 
-def test_json_edge_upstream_to_downstream():
-    g = TopologyLoader().load_from_iida_json(POC_JSON)
-    # core → distribution → access
-    assert g.has_edge("Core-Router1", "Dist-Switch1")
-    assert not g.has_edge("Dist-Switch1", "Core-Router1")
-    assert g.has_edge("Dist-Switch1", "Access-SW1")
-    assert not g.has_edge("Access-SW1", "Dist-Switch1")
+def test_clos_edge_upstream_to_downstream():
+    g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
+    assert g.has_edge("Spine1", "Leaf1")
+    assert not g.has_edge("Leaf1", "Spine1")
+    assert g.has_edge("Spine2", "Leaf3")
+    assert not g.has_edge("Leaf3", "Spine2")
 
 
-def test_json_branch_is_separate_subgraph():
-    g = TopologyLoader().load_from_iida_json(POC_JSON)
-    # Core-Router1 と Branch-Router2 はトポロジー上で接続されていない
-    assert not g.has_edge("Core-Router1", "Branch-Router2")
-    assert not g.has_edge("Branch-Router2", "Core-Router1")
+def test_clos_bgp_peers_are_added_without_overwriting_physical_links():
+    g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
+    assert g.has_edge("Leaf1", "Leaf2")
+    assert g["Leaf1"]["Leaf2"]["edge_type"] == "bgp"
+    assert g["Spine1"]["Leaf1"]["edge_type"] == "physical"
 
 
-def test_json_returns_digraph():
-    g = TopologyLoader().load_from_iida_json(POC_JSON)
+def test_clos_returns_digraph():
+    g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
     assert isinstance(g, nx.DiGraph)
 
 

@@ -1,16 +1,26 @@
-import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, RCAHistoryResponse, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
+import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, RawLogListResponse, RCAHistoryResponse, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
+import { getAccessToken } from '../auth'
 
 /** 開発時は vite.config.ts の proxy が /incidents, /topology, /ws を localhost:8080 へ転送する */
 const BASE = ''
 
+function authHeaders(body?: unknown): HeadersInit | undefined {
+  const token = getAccessToken()
+  if (!token && body === undefined) return undefined
+  return {
+    ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
-  const resp = await fetch(`${BASE}${path}`)
+  const resp = await fetch(`${BASE}${path}`, { headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
   return resp.json() as Promise<T>
 }
 
 async function put<T>(path: string): Promise<T> {
-  const resp = await fetch(`${BASE}${path}`, { method: 'PUT' })
+  const resp = await fetch(`${BASE}${path}`, { method: 'PUT', headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
   return resp.json() as Promise<T>
 }
@@ -18,9 +28,15 @@ async function put<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: authHeaders(body),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+  return resp.json() as Promise<T>
+}
+
+async function deleteRequest<T>(path: string): Promise<T> {
+  const resp = await fetch(`${BASE}${path}`, { method: 'DELETE', headers: authHeaders() })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
   return resp.json() as Promise<T>
 }
@@ -38,6 +54,12 @@ export const getRcaHistory = (id: string): Promise<RCAHistoryResponse> =>
 
 export const resolveIncident = (id: string): Promise<Incident> =>
   put<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`)
+
+export const previewClosedIncidentPurge = (before: string): Promise<{ count: number }> =>
+  deleteRequest<{ count: number }>(`/incidents?before=${encodeURIComponent(before)}`)
+
+export const purgeClosedIncidents = (before: string): Promise<{ count: number }> =>
+  deleteRequest<{ count: number }>(`/incidents?before=${encodeURIComponent(before)}&confirm=true`)
 
 export const getTopologyGraph = (): Promise<TopologyGraphResponse> =>
   get<TopologyGraphResponse>('/topology/graph')
@@ -65,6 +87,26 @@ export const getInvestigation = (id: string): Promise<InvestigationReport> =>
 
 export const listUnknownEvents = (): Promise<UnknownEventListResponse> =>
   get<UnknownEventListResponse>('/knowledge/unknown-events')
+
+export interface RawLogFilters {
+  hostname?: string
+  action?: string
+  knowledgeStatus?: string
+}
+
+export const listRawLogs = (filters: RawLogFilters = {}): Promise<RawLogListResponse> => {
+  const params = new URLSearchParams({ limit: '100' })
+  if (filters.hostname) params.set('hostname', filters.hostname)
+  if (filters.action) params.set('action', filters.action)
+  if (filters.knowledgeStatus) params.set('knowledge_status', filters.knowledgeStatus)
+  return get<RawLogListResponse>(`/raw-logs?${params}`)
+}
+
+export const previewRawLogPurge = (before: string): Promise<{ count: number }> =>
+  deleteRequest<{ count: number }>(`/raw-logs?before=${encodeURIComponent(before)}`)
+
+export const purgeRawLogs = (before: string): Promise<{ count: number }> =>
+  deleteRequest<{ count: number }>(`/raw-logs?before=${encodeURIComponent(before)}&confirm=true`)
 
 export const getUnknownEventSuggestions = (signature: string): Promise<SimilarIncidentsResponse> =>
   get<SimilarIncidentsResponse>(`/knowledge/unknown-events/${encodeURIComponent(signature)}/suggestions`)

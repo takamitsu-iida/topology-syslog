@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { getAccessToken } from '../auth'
 import type { Incident } from '../types'
 
 type WsEvent =
@@ -19,7 +20,9 @@ export function useIncidentWebSocket(onNewIncident: (inc: Incident) => void): vo
   cbRef.current = onNewIncident
 
   useEffect(() => {
-    const ws = new WebSocket(wsBase)
+    const token = getAccessToken()
+    const url = token ? `${wsBase}${wsBase.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}` : wsBase
+    const ws = new WebSocket(url)
     ws.onmessage = (event: MessageEvent<string>) => {
       try {
         const data = JSON.parse(event.data) as WsEvent

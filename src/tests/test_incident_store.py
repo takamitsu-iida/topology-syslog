@@ -110,6 +110,18 @@ def test_resolve_nonexistent():
     assert ok is False
 
 
+def test_purge_closed_before_keeps_open_and_newer_incidents():
+    store = _store()
+    store.save(_inc("INC-OLD-CLOSED", status="CLOSED", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)))
+    store.save(_inc("INC-OLD-OPEN", status="OPEN", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)))
+    store.save(_inc("INC-NEW-CLOSED", status="CLOSED", created_at=datetime(2026, 9, 1, tzinfo=timezone.utc)))
+
+    cutoff = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    assert store.count_closed_before(cutoff) == 1
+    assert store.purge_closed_before(cutoff) == 1
+    assert {incident.incident_id for incident in store.list_incidents()} == {"INC-OLD-OPEN", "INC-NEW-CLOSED"}
+
+
 def test_save_overwrites_on_same_id():
     store = _store()
     inc = _inc()

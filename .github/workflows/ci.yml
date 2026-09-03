@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Python dependencies
+        run: uv sync --locked --extra dev
+      - name: Run backend tests
+        run: uv run pytest -q
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  compose-smoke-test:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure required authentication token
+        run: echo 'AUTH_ADMIN_TOKEN=ci-admin-token' > .env
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build and start Compose services
+        run: docker compose up --build --detach --wait
+      - name: Verify authenticated UI proxy access
+        run: |
+          curl --fail --retry 10 --retry-connrefused http://localhost:3000/
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:3000/incidents)" = "401"
+          curl --fail --header 'Authorization: Bearer ci-admin-token' http://localhost:3000/incidents
+          curl --fail --header 'Authorization: Bearer ci-admin-token' http://localhost:3000/topology/graph
+          curl --fail --header 'Authorization: Bearer ci-admin-token' http://localhost:3000/filter/patterns
+          curl --fail --header 'Authorization: Bearer ci-admin-token' http://localhost:3000/raw-logs
+          curl --fail --header 'Authorization: Bearer ci-admin-token' http://localhost:3000/knowledge/rules
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop Compose services
+        if: always()
+        run: docker compose down --volumes

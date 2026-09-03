@@ -48,19 +48,17 @@ export function IncidentDetail() {
     onSuccess: (data) => setAiReport(data.report),
   })
 
-  const [investigationStarted, setInvestigationStarted] = useState(false)
   const { mutate: triggerInvestigation, isPending: isStarting } = useMutation({
     mutationFn: () => startInvestigation(id!),
-    onSuccess: () => setInvestigationStarted(true),
   })
   const { data: investigationReport } = useQuery({
     queryKey: ['investigation', id],
     queryFn: () => getInvestigation(id!),
-    enabled: investigationStarted,
+    enabled: !!id,
     // 完了 or 失敗になるまで 3 秒ごとにポーリング
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'completed' || status === 'failed' ? false : 3000
+      return status === 'completed' || status === 'failed' || status === 'interrupted' ? false : 3000
     },
   })
 
@@ -346,7 +344,7 @@ export function IncidentDetail() {
           </button>
         </div>
 
-        {!investigationStarted && !investigationReport && (
+        {!investigationReport && (
           <p className="mt-3 text-sm text-gray-400">
             ボタンをクリックすると LLM エージェントが実機に SSH 接続して状態を収集します。
           </p>
@@ -360,9 +358,9 @@ export function IncidentDetail() {
           </div>
         )}
 
-        {investigationReport?.status === 'failed' && (
+        {(investigationReport?.status === 'failed' || investigationReport?.status === 'interrupted') && (
           <p className="mt-3 text-sm text-red-600">
-            エラー: {investigationReport.error ?? '不明なエラー'}
+            {investigationReport.status === 'interrupted' ? '中断: ' : 'エラー: '}{investigationReport.error ?? '不明なエラー'}
           </p>
         )}
 

@@ -140,6 +140,22 @@ def test_resolve_incident_not_found(client):
     assert resp.status_code == 404
 
 
+def test_purge_closed_incidents_requires_confirm_and_preserves_open(client, app):
+    app.state.store.save(_make_inc("INC-CLOSED", status="CLOSED"))
+    app.state.store.save(_make_inc("INC-OPEN", status="OPEN"))
+    params = {"before": "2026-08-17T00:00:00Z"}
+
+    preview = client.delete("/incidents", params=params)
+    assert preview.status_code == 200
+    assert preview.json() == {"count": 1}
+    assert client.get("/incidents").json()["total"] == 2
+
+    deleted = client.delete("/incidents", params={**params, "confirm": "true"})
+    assert deleted.status_code == 200
+    assert deleted.json() == {"count": 1}
+    assert client.get("/incidents").json()["incidents"][0]["incident_id"] == "INC-OPEN"
+
+
 def test_process_message_immediately_merges_into_open_incident(app):
     with TestClient(app) as client:
         existing = Incident(

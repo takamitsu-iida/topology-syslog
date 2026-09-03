@@ -4,6 +4,15 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          cytoscape: ['cytoscape', 'react-cytoscapejs'],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     host: true,   // 0.0.0.0 でリッスン（VM外からアクセス可能）
@@ -24,6 +33,13 @@ export default defineConfig({
       },
       '/ingest':    'http://127.0.0.1:8080',
       '/filter':    'http://127.0.0.1:8080',
+      '/knowledge': 'http://127.0.0.1:8080',
+      '/raw-logs': {
+        target: 'http://127.0.0.1:8080',
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) return '/index.html'
+        },
+      },
       '/ws': {
         target: 'ws://127.0.0.1:8080',
         ws: true,

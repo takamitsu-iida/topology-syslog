@@ -57,8 +57,8 @@ async def start_investigation(incident_id: str, request: Request) -> Investigati
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
 
-    investigations: dict = request.app.state.investigations
-    existing = investigations.get(incident_id)
+    investigation_store = request.app.state.investigation_store
+    existing = await asyncio.to_thread(investigation_store.get, incident_id)
     if existing and existing.status == "running":
         raise HTTPException(status_code=409, detail="調査が既に実行中です")
 
@@ -68,11 +68,21 @@ async def start_investigation(incident_id: str, request: Request) -> Investigati
         started_at=datetime.now(tz=incident.created_at.tzinfo),
         status="running",
     )
-    investigations[incident_id] = placeholder
+    await asyncio.to_thread(investigation_store.save, placeholder)
 
     async def _run() -> None:
-        report = await agent.investigate(incident)
-        investigations[incident_id] = report
+        try:
+            report = await agent.investigate(incident)
+        except Exception as exc:
+            _logger.exception("調査エラー: incident=%s", incident_id)
+            report = InvestigationReport(
+                incident_id=incident_id,
+                started_at=placeholder.started_at,
+                status="failed",
+                completed_at=datetime.now(tz=incident.created_at.tzinfo),
+                error=str(exc),
+            )
+        await asyncio.to_thread(investigation_store.save, report)
         await request.app.state.ws_manager.broadcast({
             "type": "investigation.done",
             "incident_id": incident_id,
@@ -86,9 +96,7 @@ async def start_investigation(incident_id: str, request: Request) -> Investigati
 @router.get("/incidents/{incident_id}/investigation", response_model=InvestigationReportOut)
 async def get_investigation(incident_id: str, request: Request) -> InvestigationReportOut:
     """指定インシデントの調査状況・結果を返す。"""
-    _agent(request)  # 機能有効チェック
-
-    report = request.app.state.investigations.get(incident_id)
+    report = await asyncio.to_thread(request.app.state.investigation_store.get, incident_id)
     if report is None:
         raise HTTPException(status_code=404, detail="調査結果が見つかりません")
 
