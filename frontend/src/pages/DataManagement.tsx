@@ -25,7 +25,7 @@ export function DataManagement() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-4">
+    <main className="mx-auto max-w-7xl p-4">
       <header className="mb-6"><h1 className="text-2xl font-bold text-gray-800">データ管理</h1><p className="mt-1 text-sm text-gray-500">保存期間を過ぎたデータを個別に削除します。</p></header>
       <section className="border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><h2 className="font-semibold">削除は取り消せません</h2><p className="mt-1">指定日の 00:00 より前のデータが対象です。インシデントは CLOSED のものだけを削除し、OPEN のインシデントは対象外です。</p></section>
       <label className="mt-5 block max-w-xs text-sm font-medium text-gray-700">削除基準日<input type="date" value={beforeDate} onChange={(event) => setBeforeDate(event.target.value)} className="mt-1 block w-full border px-3 py-2" /></label>

@@ -85,7 +85,7 @@ export function IncidentDetail() {
   const rcaConfidence = confidenceLabel(rca.confidence)
 
   return (
-    <div className="mx-auto max-w-3xl p-4">
+    <div className="mx-auto max-w-7xl p-4">
       <Link to="/incidents" className="text-sm text-blue-500 hover:underline">
         ← インシデント一覧
       </Link>

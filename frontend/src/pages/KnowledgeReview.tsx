@@ -80,7 +80,7 @@ export function KnowledgeReview() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl p-4">
+    <main className="mx-auto max-w-7xl p-4">
       <header className="mb-5 flex items-baseline justify-between gap-3">
         <div><h1 className="text-2xl font-bold text-gray-800">SYSLOG Knowledge Review</h1><p className="mt-1 text-sm text-gray-500">未知イベントをレビューし、承認後にのみ運用ルールとして有効化します。</p></div>
         <span className="text-sm text-gray-500">未知イベント: {events.data?.total ?? 0}</span>

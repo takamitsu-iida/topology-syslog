@@ -48,7 +48,7 @@ export function IncidentList() {
   })
 
   return (
-    <div className="mx-auto max-w-3xl p-4">
+    <div className="mx-auto max-w-7xl p-4">
       <div className="mb-2 flex items-center">
         <h1 className="text-2xl font-bold text-gray-800">インシデント一覧</h1>
       </div>
