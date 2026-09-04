@@ -11,9 +11,13 @@ const STATUS_FILTERS = [
   { label: '全て',     value: undefined },
 ]
 
+const NODE_STATE_PREVIEW_LIMIT = 6
+const NODE_STATE_ORDER = { DOWN: 0, DEGRADED: 1, UNKNOWN: 2, UP: 3 }
+
 export function IncidentList() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>('OPEN')
   const [showPatterns, setShowPatterns] = useState(false)
+  const [showAllNodeStates, setShowAllNodeStates] = useState(false)
   const qc = useQueryClient()
 
   const { data, isLoading, isError } = useQuery({
@@ -52,6 +56,17 @@ export function IncidentList() {
   useIncidentWebSocket(() => {
     void qc.invalidateQueries({ queryKey: ['incidents'] })
   })
+
+  const sortedNodeStates = [...(nodeStates ?? [])].sort((left, right) => {
+    const stateOrder = NODE_STATE_ORDER[left.state] - NODE_STATE_ORDER[right.state]
+    return stateOrder !== 0 ? stateOrder : left.node_id.localeCompare(right.node_id)
+  })
+  const visibleNodeStates = showAllNodeStates ? sortedNodeStates : sortedNodeStates.slice(0, NODE_STATE_PREVIEW_LIMIT)
+  const hiddenNodeStateCount = sortedNodeStates.length - visibleNodeStates.length
+  const nodeStateCounts = sortedNodeStates.reduce(
+    (counts, node) => ({ ...counts, [node.state]: counts[node.state] + 1 }),
+    { UP: 0, DOWN: 0, DEGRADED: 0, UNKNOWN: 0 },
+  )
 
   return (
     <div className="mx-auto max-w-7xl p-4">
@@ -101,11 +116,35 @@ export function IncidentList() {
       </div>
 
       <section className="mb-4 border border-gray-200 bg-white p-3" aria-label="ノード状態">
-        <div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold text-gray-700">ノード状態</h2><span className="text-xs text-gray-500">30秒ごとに更新</span></div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">ノード状態</h2>
+            <p className="text-xs text-gray-500">障害・劣化ノードを優先表示 / 30秒ごとに更新</p>
+          </div>
+          {nodeStates && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="rounded bg-red-50 px-2 py-1 text-red-700">DOWN {nodeStateCounts.DOWN}</span>
+              <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">DEGRADED {nodeStateCounts.DEGRADED}</span>
+              <span className="rounded bg-gray-100 px-2 py-1 text-gray-600">UNKNOWN {nodeStateCounts.UNKNOWN}</span>
+              <span className="rounded bg-green-50 px-2 py-1 text-green-700">UP {nodeStateCounts.UP}</span>
+            </div>
+          )}
+        </div>
         {isNodeMonitorError && <p className="text-sm text-amber-700">モニター状態を取得できません</p>}
-        {nodeStates && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {nodeStates.map((node) => <div key={node.node_id} className="border border-gray-200 px-2 py-1.5 text-sm"><div className="flex justify-between gap-2"><span className="font-medium text-gray-800">{node.node_id}</span><span className={node.state === 'UP' ? 'text-green-700' : node.state === 'DOWN' ? 'text-red-700' : node.state === 'DEGRADED' ? 'text-amber-700' : 'text-gray-500'}>{node.state}</span></div><p className="mt-1 truncate text-xs text-gray-500" title={node.reason}>{node.reason}</p><time className="text-xs text-gray-400">観測: {new Date(node.observed_at).toLocaleString()}</time></div>)}
-        </div>}
+        {nodeStates && <>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleNodeStates.map((node) => <div key={node.node_id} className="border border-gray-200 px-2 py-1.5 text-sm"><div className="flex justify-between gap-2"><span className="truncate font-medium text-gray-800" title={node.node_id}>{node.node_id}</span><span className={node.state === 'UP' ? 'text-green-700' : node.state === 'DOWN' ? 'text-red-700' : node.state === 'DEGRADED' ? 'text-amber-700' : 'text-gray-500'}>{node.state}</span></div><p className="mt-1 truncate text-xs text-gray-500" title={node.reason}>{node.reason}</p><time className="text-xs text-gray-400">観測: {new Date(node.observed_at).toLocaleString()}</time></div>)}
+          </div>
+          {sortedNodeStates.length > NODE_STATE_PREVIEW_LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllNodeStates((current) => !current)}
+              className="mt-2 rounded border px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            >
+              {showAllNodeStates ? 'ノード状態を折りたたむ' : `残り${hiddenNodeStateCount}ノードを表示`}
+            </button>
+          )}
+        </>}
       </section>
 
       {/* 無視パターン一覧 */}
