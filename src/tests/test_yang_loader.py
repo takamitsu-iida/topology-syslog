@@ -24,6 +24,13 @@ def test_clos_edge_upstream_to_downstream():
     assert not g.has_edge("Leaf3", "Spine2")
 
 
+def test_clos_interface_addresses_are_retained():
+    g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
+    assert "10.2.11.1" in g.nodes["Spine2"]["addresses"]
+    assert g.nodes["Spine2"]["loopback"] == "10.0.0.2"
+    assert g.nodes["Spine2"]["node_monitor_enabled"] is True
+
+
 def test_clos_bgp_peers_are_added_without_overwriting_physical_links():
     g = TopologyLoader().load_from_iida_yaml(CLOS_YAML)
     assert g.has_edge("Leaf1", "Leaf2")

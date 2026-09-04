@@ -4,6 +4,7 @@ import networkx as nx
 import pytest
 
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
+from topology_syslog.node_monitor.models import NodeState, NodeStateRecord
 from topology_syslog.models import SyslogMessage
 from topology_syslog.topology.graph_engine import GraphEngine
 
@@ -239,6 +240,66 @@ def test_silent_inference_not_triggered_for_single_leaf():
     incidents = RootCauseInferencer().infer(msgs, engine)
     # Leaf1 が独立インシデントになり、Spine1 はサイレント根本原因にならない
     assert len(incidents) == 1
+    assert incidents[0].root_cause_node == "Leaf1"
+
+
+def test_silent_root_cause_inferred_from_single_leaf_named_peer():
+    """単一 Leaf でも、BGP ログで無発報の上流 peer が特定できれば推論する。"""
+    g = nx.DiGraph()
+    g.add_node("Spine2", role="spine", addresses={"10.2.11.1"})
+    g.add_node("Leaf1", role="leaf")
+    g.add_edge("Spine2", "Leaf1", edge_type="physical")
+    engine = GraphEngine(g)
+
+    incidents = RootCauseInferencer().infer([
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor 10.2.11.1 Down"),
+    ], engine)
+
+    assert len(incidents) == 1
+    assert incidents[0].root_cause_node == "Spine2"
+    assert incidents[0].secondary_nodes == ["Leaf1"]
+    assert incidents[0].primary_event == "(inferred \u2014 node did not send SYSLOG)"
+
+
+class _NodeStateReader:
+    def __init__(self, state: NodeState) -> None:
+        self._state = state
+
+    def get(self, node_id: str, *, now=None) -> NodeStateRecord:
+        observed_at = datetime.now(tz=timezone.utc)
+        return NodeStateRecord(
+            node_id=node_id,
+            state=self._state,
+            observed_at=observed_at,
+            expires_at=observed_at,
+            reason="test monitor result",
+        )
+
+
+def _single_leaf_peer_engine() -> GraphEngine:
+    g = nx.DiGraph()
+    g.add_node("Spine2", role="spine", addresses={"10.2.11.1"})
+    g.add_node("Leaf1", role="leaf")
+    g.add_edge("Spine2", "Leaf1", edge_type="physical")
+    return GraphEngine(g)
+
+
+def test_down_peer_adds_node_monitor_evidence_and_confidence():
+    incidents = RootCauseInferencer(node_state_reader=_NodeStateReader(NodeState.DOWN)).infer([
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor 10.2.11.1 Down"),
+    ], _single_leaf_peer_engine())
+
+    incident = incidents[0]
+    assert incident.root_cause_node == "Spine2"
+    assert incident.rca_explanation.confidence == 0.75
+    assert any(evidence.source == "node-monitor" for evidence in incident.rca_explanation.primary_candidate.evidences)
+
+
+def test_up_peer_does_not_become_silent_root_cause():
+    incidents = RootCauseInferencer(node_state_reader=_NodeStateReader(NodeState.UP)).infer([
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor 10.2.11.1 Down"),
+    ], _single_leaf_peer_engine())
+
     assert incidents[0].root_cause_node == "Leaf1"
 
 

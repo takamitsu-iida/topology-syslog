@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Topology Syslog</title>
+  <rect width="64" height="64" rx="14" fill="#172033"/>
+  <path d="M16 20h12v12H16zM36 20h12v12H36zM26 40h12v12H26z" fill="#36c7a1"/>
+  <path d="M28 26h8M22 32l8 8M42 32l-8 8" fill="none" stroke="#f4f7f6" stroke-linecap="round" stroke-width="4"/>
+</svg>

@@ -238,6 +238,8 @@ def main() -> None:
         auth_reader_token=os.getenv("AUTH_READER_TOKEN") or None,
         auth_operator_token=os.getenv("AUTH_OPERATOR_TOKEN") or None,
         auth_admin_token=os.getenv("AUTH_ADMIN_TOKEN") or None,
+        node_monitor_url=os.getenv("NODE_MONITOR_URL") or None,
+        node_monitor_token=os.getenv("NODE_MONITOR_API_TOKEN") or None,
     )
 
     uvicorn.run(

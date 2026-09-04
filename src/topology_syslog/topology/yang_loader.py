@@ -69,6 +69,17 @@ def _build_graph(data: dict) -> nx.DiGraph:
         role_str: str = dev.get("role", "other")
         role_of[dev_id] = _ROLE_PRIORITY.get(role_str, 5)
         node_attrs: dict = {"role": role_str}
+        loopback = dev.get("loopback")
+        if loopback:
+            node_attrs["loopback"] = loopback.split("/", 1)[0]
+        node_attrs["node_monitor_enabled"] = bool(dev.get("node-monitor-enabled", False))
+        addresses = {
+            interface["ip-address"].split("/", 1)[0]
+            for interface in dev.get("interface", [])
+            if interface.get("ip-address")
+        }
+        if addresses:
+            node_attrs["addresses"] = addresses
         raw_sev = dev.get("syslog-min-severity")
         if raw_sev is not None:
             node_attrs["syslog_min_severity"] = _parse_severity(raw_sev)

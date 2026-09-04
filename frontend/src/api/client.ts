@@ -1,4 +1,4 @@
-import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, RawLogListResponse, RCAHistoryResponse, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
+import type { AiReport, FilterPatternsResponse, FilterReloadResponse, Incident, IncidentListResponse, InvestigationReport, KnowledgeRule, KnowledgeRuleInput, NodeStateRecord, RawLogListResponse, RCAHistoryResponse, SimilarIncidentsResponse, TopologyGraphResponse, UnknownEventListResponse } from '../types'
 import { getAccessToken } from '../auth'
 
 /** 開発時は vite.config.ts の proxy が /incidents, /topology, /ws を localhost:8080 へ転送する */
@@ -63,6 +63,8 @@ export const purgeClosedIncidents = (before: string): Promise<{ count: number }>
 
 export const getTopologyGraph = (): Promise<TopologyGraphResponse> =>
   get<TopologyGraphResponse>('/topology/graph')
+
+export const listNodeStates = (): Promise<NodeStateRecord[]> => get<NodeStateRecord[]>('/node-states')
 
 export const reloadTopology = (): Promise<{ status: string; nodes: number; edges: number }> =>
   post('/topology/reload')

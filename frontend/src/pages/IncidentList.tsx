@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listIncidents, resolveIncident, reloadTopology, getFilterPatterns, reloadFilter } from '../api/client'
+import { listIncidents, listNodeStates, resolveIncident, reloadTopology, getFilterPatterns, reloadFilter } from '../api/client'
 import { IncidentCard } from '../components/IncidentCard'
 import { useIncidentWebSocket } from '../hooks/useWebSocket'
 
@@ -26,6 +26,12 @@ export function IncidentList() {
     queryKey: ['filter/patterns'],
     queryFn: getFilterPatterns,
     enabled: showPatterns,
+  })
+
+  const { data: nodeStates, isError: isNodeMonitorError } = useQuery({
+    queryKey: ['node-states'],
+    queryFn: listNodeStates,
+    refetchInterval: 30_000,
   })
 
   const resolve = useMutation({
@@ -93,6 +99,14 @@ export function IncidentList() {
           <span className="text-xs text-red-500">フィルター更新失敗</span>
         )}
       </div>
+
+      <section className="mb-4 border border-gray-200 bg-white p-3" aria-label="ノード状態">
+        <div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold text-gray-700">ノード状態</h2><span className="text-xs text-gray-500">30秒ごとに更新</span></div>
+        {isNodeMonitorError && <p className="text-sm text-amber-700">モニター状態を取得できません</p>}
+        {nodeStates && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {nodeStates.map((node) => <div key={node.node_id} className="border border-gray-200 px-2 py-1.5 text-sm"><div className="flex justify-between gap-2"><span className="font-medium text-gray-800">{node.node_id}</span><span className={node.state === 'UP' ? 'text-green-700' : node.state === 'DOWN' ? 'text-red-700' : node.state === 'DEGRADED' ? 'text-amber-700' : 'text-gray-500'}>{node.state}</span></div><p className="mt-1 truncate text-xs text-gray-500" title={node.reason}>{node.reason}</p><time className="text-xs text-gray-400">観測: {new Date(node.observed_at).toLocaleString()}</time></div>)}
+        </div>}
+      </section>
 
       {/* 無視パターン一覧 */}
       {showPatterns && (

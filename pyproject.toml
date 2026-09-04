@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 topology-syslog = "topology_syslog.__main__:main"
+topology-syslog-node-monitor = "topology_syslog.node_monitor.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

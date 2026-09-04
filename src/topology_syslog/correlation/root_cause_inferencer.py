@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 from topology_syslog.correlation.confidence import score_rca_explanation
 from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate, SyslogMessage
+from topology_syslog.node_monitor.models import NodeState, NodeStateRecord
+from topology_syslog.node_monitor.store import NodeStateReader
 from topology_syslog.topology.graph_engine import GraphEngine
 
 # BGP エッジを有効化するルーティングプロトコル識別子
@@ -22,6 +24,7 @@ _ROUTING_PREFIXES: frozenset[str] = frozenset([
 
 # Cisco IOS %FAC-SEV-MNEM 抽出
 _CISCO_EVENT_RE = re.compile(r'%[A-Z0-9_]+-\d+-[A-Z0-9_]+')
+_BGP_NEIGHBOR_DOWN_RE = re.compile(r'\bneighbor\s+(\S+)\s+down\b', re.IGNORECASE)
 
 
 def _extract_event_type(message: str) -> str | None:
@@ -85,6 +88,25 @@ def _find_silent_root_candidates(
     ]
 
 
+def _find_explicit_silent_root_candidates(
+    active: list[SyslogMessage],
+    active_nodes: set[str],
+    graph: GraphEngine,
+) -> dict[str, set[str]]:
+    """BGP neighbor down に明示された、無発報の直接上流 peer を返す。"""
+    candidates: dict[str, set[str]] = {}
+    for message in active:
+        match = _BGP_NEIGHBOR_DOWN_RE.search(message.message)
+        if match is None:
+            continue
+        peer = graph.find_node_by_address(match.group(1))
+        if peer is None or peer in active_nodes:
+            continue
+        if peer in graph.get_ancestors_filtered(message.hostname, frozenset()):
+            candidates.setdefault(peer, set()).add(message.hostname)
+    return candidates
+
+
 def _build_rca_explanation(
     root_cause_node: str,
     secondary_nodes: list[str],
@@ -94,6 +116,7 @@ def _build_rca_explanation(
     *,
     silent: bool = False,
     flapping: bool = False,
+    node_state: NodeStateRecord | None = None,
 ) -> RCAExplanation:
     evidences: list[RCAEvidence] = []
     root_log_ids = [str(idx) for idx, msg in enumerate(messages) if msg.hostname == root_cause_node]
@@ -131,6 +154,14 @@ def _build_rca_explanation(
             weight=0.0,
             related_nodes=related_nodes,
             related_log_ids=[str(idx) for idx, msg in enumerate(messages) if msg.hostname in secondary_nodes],
+        ))
+
+    if node_state is not None and node_state.state == NodeState.DOWN:
+        evidences.append(RCAEvidence(
+            source="node-monitor",
+            summary=f"{root_cause_node} is DOWN according to node monitor: {node_state.reason}",
+            weight=0.0,
+            related_nodes=[root_cause_node],
         ))
 
     upstream_logged = sorted(
@@ -173,12 +204,14 @@ class RootCauseInferencer:
         severity_threshold: int = 5,
         silent_coverage: float = 0.6,
         flapping_threshold: int = 3,
+        node_state_reader: NodeStateReader | None = None,
     ) -> None:
         self._counters: dict[str, int] = {}
         # 0=EMERG…5=NOTICE を推論対象、6=INFO / 7=DEBUG は raw_logs のみ
         self._severity_threshold = severity_threshold
         self._silent_coverage = silent_coverage
         self._flapping_threshold = flapping_threshold
+        self._node_state_reader = node_state_reader
 
     def infer(
         self,
@@ -249,6 +282,36 @@ class RootCauseInferencer:
                 assigned.add(node)
 
         # サイレント根本原因: ログを送れなかった上流ノードを正規処理の前に検出・集約
+        explicit_silent_roots = _find_explicit_silent_root_candidates(active, active_nodes, graph)
+        for src, covered_nodes in sorted(explicit_silent_roots.items()):
+            node_state = self._node_state_reader.get(src) if self._node_state_reader else None
+            if node_state is not None and node_state.state == NodeState.UP:
+                continue
+            covered = sorted(covered_nodes - assigned)
+            if not covered:
+                continue
+            related_msgs = [m for m in messages if m.hostname in set(covered)]
+            incidents.append(Incident(
+                incident_id=self._new_id(date_str),
+                created_at=now,
+                root_cause_node=src,
+                primary_event=_SILENT_EVENT,
+                secondary_nodes=covered,
+                raw_log_count=len(related_msgs),
+                raw_logs=[m.message for m in related_msgs],
+                status="OPEN",
+                rca_explanation=_build_rca_explanation(
+                    src,
+                    covered,
+                    related_msgs,
+                    graph,
+                    bgp_nodes,
+                    silent=True,
+                    node_state=node_state,
+                ),
+            ))
+            assigned.update(covered)
+
         for src in _find_silent_root_candidates(active_nodes, graph, bgp_nodes, self._silent_coverage):
             descendants = graph.get_descendants_filtered(src, bgp_nodes)
             covered = sorted((active_nodes.intersection(descendants)) - assigned)

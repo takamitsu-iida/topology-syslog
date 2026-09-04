@@ -19,6 +19,7 @@ from topology_syslog.api.routes.incidents import router as incidents_router
 from topology_syslog.api.routes.ingest import router as ingest_router
 from topology_syslog.api.routes.investigation import router as investigation_router
 from topology_syslog.api.routes.knowledge import router as knowledge_router
+from topology_syslog.api.routes.node_states import router as node_states_router
 from topology_syslog.api.routes.raw_logs import router as raw_logs_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
@@ -277,6 +278,8 @@ def create_app(
     auth_reader_token: str | None = None,
     auth_operator_token: str | None = None,
     auth_admin_token: str | None = None,
+    node_monitor_url: str | None = None,
+    node_monitor_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -316,9 +319,14 @@ def create_app(
             app.state.vigil_notifier = VigilNotifier(vigil_url, team_name=vigil_team_name)
         else:
             app.state.vigil_notifier = None
+        app.state.node_state_reader = None
+        if node_monitor_url:
+            from topology_syslog.node_monitor.client import HttpNodeStateReader
+            app.state.node_state_reader = HttpNodeStateReader(node_monitor_url, auth_token=node_monitor_token)
         app.state.inferencer = RootCauseInferencer(
             severity_threshold=inference_severity_threshold,
             flapping_threshold=flapping_threshold,
+            node_state_reader=app.state.node_state_reader,
         )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
         app.state.ignore_file = ignore_file
@@ -427,6 +435,9 @@ def create_app(
         cleanup.cancel()
         for task in app.state.recovery_tasks.values():
             task.cancel()
+        close_node_state_reader = getattr(app.state.node_state_reader, "close", None)
+        if close_node_state_reader is not None:
+            close_node_state_reader()
         if transport:
             transport.close()
 
@@ -457,4 +468,5 @@ def create_app(
     app.include_router(ai_router)
     app.include_router(investigation_router)
     app.include_router(knowledge_router)
+    app.include_router(node_states_router)
     return app

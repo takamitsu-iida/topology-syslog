@@ -18,6 +18,8 @@ services:
       SKB_PATH: "configs/syslog_knowledge"
       AUTH_ENABLED: "true"
       CORS_ORIGINS: "http://localhost:3000"
+      NODE_MONITOR_URL: "http://node-monitor:8090"
+      NODE_MONITOR_API_TOKEN: "${NODE_MONITOR_API_TOKEN:?set NODE_MONITOR_API_TOKEN in .env}"
     volumes:
       - ./configs:/app/configs:ro  # トポロジー定義（読み取り専用）
       - data:/data                  # incidents.db と .chromadb を永続化
@@ -38,6 +40,28 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  node-monitor:
+    build:
+      context: .
+      dockerfile: node_monitor/Dockerfile
+    environment:
+      NODE_MONITOR_HOST: "0.0.0.0"
+      NODE_MONITOR_PORT: "8090"
+      NODE_MONITOR_TOPOLOGY_PATH: "configs/clos/yang_topology.yaml"
+      NODE_MONITOR_TOPOLOGY_SOURCE: "iida-yaml"
+      NODE_MONITOR_TCP_PORTS: "179"
+      NODE_MONITOR_API_TOKEN: "${NODE_MONITOR_API_TOKEN:?set NODE_MONITOR_API_TOKEN in .env}"
+    volumes:
+      - ./configs:/app/configs:ro
+    ports:
+      - "8090:8090"
     restart: unless-stopped
     logging:
       driver: json-file

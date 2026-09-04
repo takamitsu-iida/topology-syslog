@@ -94,6 +94,15 @@ export interface IncidentListResponse {
   total: number
 }
 
+export interface NodeStateRecord {
+  node_id: string
+  state: 'UP' | 'DOWN' | 'DEGRADED' | 'UNKNOWN'
+  observed_at: string
+  expires_at: string
+  reason: string
+  probes: Array<{ probe_type: string; target: string; success: boolean | null; observed_at: string; latency_ms: number | null; error: string | null }>
+}
+
 export interface TopologyNodeData {
   id: string
   role: string

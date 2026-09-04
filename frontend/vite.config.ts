@@ -31,6 +31,7 @@ export default defineConfig({
           if (req.headers.accept?.includes('text/html')) return '/index.html'
         },
       },
+      '/node-states': 'http://127.0.0.1:8080',
       '/ingest':    'http://127.0.0.1:8080',
       '/filter':    'http://127.0.0.1:8080',
       '/knowledge': 'http://127.0.0.1:8080',

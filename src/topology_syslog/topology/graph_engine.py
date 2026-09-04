@@ -69,6 +69,13 @@ class GraphEngine:
         succs = list(self._graph.successors(node_id))
         return list(dict.fromkeys(preds + succs))  # 順序を保ちつつ重複除去
 
+    def find_node_by_address(self, address: str) -> str | None:
+        """管理・インターフェース IP アドレスに対応するノードを返す。"""
+        for node, attrs in self._graph.nodes(data=True):
+            if address in attrs.get("addresses", set()):
+                return node
+        return None
+
     @property
     def nodes(self) -> list[str]:
         return list(self._graph.nodes)
