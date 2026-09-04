@@ -25,7 +25,7 @@ export default defineConfig({
           if (req.headers.accept?.includes('text/html')) return '/index.html'
         },
       },
-      '/topology': {
+      '^/topology(?:/|$)': {
         target: 'http://127.0.0.1:8080',
         bypass(req) {
           if (req.headers.accept?.includes('text/html')) return '/index.html'
