@@ -42,6 +42,22 @@ def test_rfc5424_message_body():
     assert msg.event_type == "%BGP-5-ADJCHANGE"
 
 
+def test_aruba_iap_hostname_severity_and_event_type():
+    raw = (
+        b"2026-09-04T06:26:12+09:00 2026 192.168.122.244 cli[5460]: "
+        b"<541013> <WARN> AP:ap01-aruba-515 <192.168.122.244 FC:7F:F1:C4:BD:76>  "
+        b"recv_user_sync_message,12625: add client 06:bf:9b:54:de:9e, client count 20."
+    )
+    msg = parse(raw, "192.168.122.244")
+    assert msg.hostname == "ap01-aruba-515"
+    assert msg.facility == 1
+    assert msg.severity == 4
+    assert msg.event_type == "ARUBA-541013"
+    assert msg.vendor == "aruba-aos"
+    assert msg.normalized_signature == "ARUBA-541013"
+    assert msg.message.startswith("recv_user_sync_message")
+
+
 def test_fallback_on_invalid_format():
     raw = b"this is not a valid syslog message"
     msg = parse(raw, "10.0.0.99")

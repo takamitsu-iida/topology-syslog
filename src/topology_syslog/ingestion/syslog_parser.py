@@ -32,6 +32,36 @@ _RFC3164_TS_RE = re.compile(
     re.DOTALL,
 )
 
+# Aruba Instant AP: "2026-09-04T06:26:12+09:00 2026 192.0.2.1 cli[123]: <541004> <WARN> AP:name <ip mac> message"
+_ARUBA_IAP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\s+"
+    r"\d{4}\s+"
+    r"(?P<host_ip>\S+)\s+"
+    r"(?P<process>\S+):\s+"
+    r"<(?P<event_code>\d+)>\s+"
+    r"<(?P<level>[A-Z]+)>\s+"
+    r"AP:(?P<ap_name>\S+)\s+"
+    r"<(?P<ap_identity>[^>]+)>\s+"
+    r"(?P<message>.*)$",
+    re.DOTALL,
+)
+
+_ARUBA_SEVERITY = {
+    "EMERG": 0,
+    "EMERGENCY": 0,
+    "ALERT": 1,
+    "CRIT": 2,
+    "CRITICAL": 2,
+    "ERR": 3,
+    "ERROR": 3,
+    "WARN": 4,
+    "WARNING": 4,
+    "NOTICE": 5,
+    "INFO": 6,
+    "INFORMATIONAL": 6,
+    "DEBUG": 7,
+}
+
 
 def parse(raw: bytes, source_ip: str) -> SyslogMessage:
     text = raw.decode("utf-8", errors="replace").strip()
@@ -40,6 +70,7 @@ def parse(raw: bytes, source_ip: str) -> SyslogMessage:
     msg = (
         _try_rfc5424(text, source_ip, now)
         or _try_rfc3164(text, source_ip, now)
+        or _try_aruba_iap(text, source_ip, now)
         or _fallback(text, source_ip, now)
     )
     msg.is_recovery = bool(_RECOVERY_RE.search(msg.message))
@@ -111,6 +142,22 @@ def _try_rfc3164(text: str, source_ip: str, now: datetime) -> SyslogMessage | No
         severity=severity,
         message=message,
         event_type=_cisco_event(message),
+    )
+
+
+def _try_aruba_iap(text: str, source_ip: str, now: datetime) -> SyslogMessage | None:
+    m = _ARUBA_IAP_RE.match(text)
+    if not m:
+        return None
+    level = m.group("level")
+    return SyslogMessage(
+        received_at=now,
+        source_ip=source_ip,
+        hostname=m.group("ap_name"),
+        facility=1,
+        severity=_ARUBA_SEVERITY.get(level, 5),
+        message=m.group("message").strip(),
+        event_type=f"ARUBA-{m.group('event_code')}",
     )
 
 

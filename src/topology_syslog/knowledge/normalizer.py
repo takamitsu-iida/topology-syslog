@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 _CISCO_EVENT_RE = re.compile(r"%([A-Z0-9_]+)-[0-7]-([A-Z0-9_]+)")
+_ARUBA_EVENT_RE = re.compile(r"^ARUBA-(\d+)$")
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _NUMBER_RE = re.compile(r"\b\d+\b")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -24,6 +25,10 @@ def normalize(event_type: str | None, message: str) -> tuple[str | None, str]:
     match = _CISCO_EVENT_RE.search(event_type or message)
     if match:
         return "cisco-ios", f"%{match.group(1)}-*-{match.group(2)}"
+
+    match = _ARUBA_EVENT_RE.match(event_type or "")
+    if match:
+        return "aruba-aos", f"ARUBA-{match.group(1)}"
 
     normalized = _IP_RE.sub("<ip>", message.upper())
     normalized = _NUMBER_RE.sub("<n>", normalized)
