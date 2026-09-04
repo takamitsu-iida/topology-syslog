@@ -5,10 +5,10 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
 
 from topology_syslog.node_monitor.evaluator import evaluate_state
-from topology_syslog.node_monitor.models import NodeState, NodeStateRecord, ProbeResult
+from topology_syslog.node_monitor.models import NodeState, NodeStateChangeEvent, NodeStateRecord, ProbeResult
 from topology_syslog.node_monitor.metrics import NodeMonitorMetrics
 from topology_syslog.node_monitor.probes import Probe
 from topology_syslog.node_monitor.store import InMemoryNodeStateStore
@@ -28,6 +28,7 @@ class NodeMonitor:
         max_concurrent_checks: int = 10,
         clock: Callable[[], datetime] | None = None,
         metrics: NodeMonitorMetrics | None = None,
+        on_state_change: Callable[[NodeStateChangeEvent], None] | None = None,
     ) -> None:
         if (
             ttl_sec <= 0
@@ -48,6 +49,8 @@ class NodeMonitor:
         self._failure_counts: dict[str, int] = {}
         self._targets: dict[str, str] = {}
         self._metrics = metrics or NodeMonitorMetrics()
+        self._on_state_change = on_state_change
+        self._events: list[NodeStateChangeEvent] = []
 
     def register_target(self, node_id: str, target: str) -> None:
         self._targets[node_id] = target
@@ -61,6 +64,10 @@ class NodeMonitor:
     @property
     def metrics(self) -> NodeMonitorMetrics:
         return self._metrics
+
+    def drain_events(self) -> list[NodeStateChangeEvent]:
+        events, self._events = self._events, []
+        return events
 
     async def check(self, node_id: str, *, force: bool = False) -> NodeStateRecord:
         target = self._targets.get(node_id)
@@ -144,9 +151,41 @@ class NodeMonitor:
         changed = previous.state != state
         self._metrics.record_check(state, changed)
         if changed:
-            _logger.info(json.dumps({
-                "event": "node_state_changed", "node_id": node_id,
-                "previous_state": previous.state.value, "state": state.value,
-                "reason": reason,
-            }, sort_keys=True))
+            event = NodeStateChangeEvent(
+                event_id=f"node-state-{node_id}-{observed_at.strftime('%Y%m%dT%H%M%S.%fZ')}-{state.value}",
+                event_type="node_state.changed",
+                node_id=node_id,
+                previous_state=previous.state,
+                state=state,
+                observed_at=observed_at,
+                reason=reason,
+                probes=probe_results,
+            )
+            self._events.append(event)
+            if self._on_state_change is not None:
+                self._on_state_change(event)
+            _logger.info(json.dumps(_event_to_dict(event), sort_keys=True))
         return record
+
+
+def _event_to_dict(event: NodeStateChangeEvent) -> dict:
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "node_id": event.node_id,
+        "previous_state": event.previous_state.value,
+        "state": event.state.value,
+        "observed_at": event.observed_at.isoformat(),
+        "reason": event.reason,
+        "probes": [
+            {
+                "probe_type": probe.probe_type,
+                "target": probe.target,
+                "success": probe.success,
+                "observed_at": probe.observed_at.isoformat(),
+                "latency_ms": probe.latency_ms,
+                "error": probe.error,
+            }
+            for probe in event.probes
+        ],
+    }

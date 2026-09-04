@@ -43,6 +43,23 @@ Docker Compose では `backend` と別の `node-monitor` サービスとして�
 
 各状態レコードには、`node_id`、`state`、`observed_at`、`expires_at`、`probes`、`reason`、`monitor_id` を含めます。`probes` には試行した方式、成功可否、遅延、エラー概要を保存します。
 
+## 実装済み動作の流れ
+
+Spine が停止した場合、node-monitor は定期確認で ICMP と TCP/179 の結果を集約します。異なるプローブが失敗して `DOWN` になると、状態変化イベントを一度だけ生成し、webhook の bounded queue から backend へ非同期送信します。
+
+backend はイベントを受信すると、次の処理を行います。
+
+1. 共有トークンを検証し、`event_id` を永続ストアへ登録する。
+2. 同じ `event_id` の重複イベントは再処理しない。
+3. `root_cause_node`、`secondary_nodes`、トポロジーの順に関連する OPEN インシデントを検索する。
+4. 関連インシデントへ `node-monitor` evidence を追加し、RCA confidence と履歴を更新する。
+5. 必要に応じて WebSocket の `incident.updated` を UI へ送信する。
+
+状態復旧時は、`UP` イベントだけで即時クローズしません。関連インシデントを `DEGRADED -> RECOVERING` とし、quiet period 経過後に `RECOVERED` へ遷移します。quiet period 中に新しい障害イベントが到着した場合は、復旧タスクを無効化して復旧確定を行いません。
+
+イベントはノードごとの `observed_at` で順序管理します。遅れて到着した古いイベントは `STALE` として受け付けますが、現在のインシデント状態を古い状態へ戻しません。`UNKNOWN` は装置停止とは断定せず、監視不能・期限切れ・プローブ不能として記録します。
+
+node-monitor と backend のどちらかが停止しても、node-monitor のプローブ処理は継続します。webhook 配送は timeout と指数バックオフで再試行し、終了時に未配送キューを破棄してプロセス停止を妨げません。
 `ping` の失敗のみで `DOWN` にしません。ICMP フィルタ、管理経路断、CoPP と装置停止を区別できないためです。ICMP、TCP/179、SSH/NETCONF の組み合わせと、連続失敗回数で状態を決めます。
 
 ## 監視対象の選択
@@ -58,6 +75,45 @@ Docker Compose では `backend` と別の `node-monitor` サービスとして�
 
 プローブ先は有効化されたノードの `loopback` を優先し、未設定時だけインターフェース IP を使います。
 
+`node-monitor` は `NODE_MONITOR_TOPOLOGY_PATH` で指定されたトポロジーを読み込み、`node-monitor-enabled: true` のノードだけを起動時に登録します。現在の CLOS 構成では `Spine1`、`Spine2`、`Leaf1`、`Leaf2`、`Leaf3` が対象です。
+
+## 実行間隔と状態確認
+
+デフォルトでは起動直後に全対象ノードを一度確認し、その後 **30 秒間隔** で定期確認します。
+
+```text
+NODE_MONITOR_INTERVAL_SEC=30       # 定期確認の間隔
+NODE_MONITOR_TTL_SEC=60             # 正常状態を再利用できる期間
+NODE_MONITOR_MIN_CHECK_INTERVAL_SEC=5
+NODE_MONITOR_MAX_FAILURE_BACKOFF_SEC=300
+NODE_MONITOR_PROBE_TIMEOUT_SEC=2
+NODE_MONITOR_MAX_CONCURRENT_CHECKS=10
+```
+
+各定期確認では、対象ノードに対して ICMP と設定された TCP ポートを確認します。現在の TCP ポートの既定値は `179` です。`TcpProbe` は TCP 接続を開いて閉じるだけで、SSH ログインや認証、コマンド実行は行いません。
+
+状態判定は次のとおりです。
+
+- 成功したプローブが一つ以上あれば `UP`。
+- 成功プローブがあり、必須プローブが失敗した場合は `DEGRADED`。
+- 異なるプローブ方式が二つ以上失敗した場合は `DOWN`。
+- 一つの失敗だけ、未観測、期限切れ、プローブ実行不能は `UNKNOWN`。
+
+正常状態は TTL 内では再プローブせず、結果を再利用します。失敗時はノード単位で最短確認間隔を適用し、指数バックオフします。同一ノードへの同時確認は single-flight で一つに集約され、全ノードを合わせた同時確認数も制限されます。
+
+## 起動と停止
+
+Docker Compose では `backend`、`frontend`、`node-monitor` を別サービスとして起動します。開発環境では Makefile から同じ構成を起動できます。
+
+```bash
+make start          # node-monitor、backend、frontend を起動
+make stop           # frontend、backend、node-monitor を停止
+make status         # 3 プロセスの状態を表示
+make logs-monitor   # node-monitor のログを表示
+```
+
+node-monitor は既定で `http://localhost:8090`、backend は `NODE_MONITOR_URL` を通じて `http://127.0.0.1:8090` を参照します。各プロセスの PID は `.pids/`、ログは `logs/` に保存されます。
+
 ## API 契約
 
 初期バージョンは監視サービスが次の read-only API を公開します。
@@ -66,7 +122,10 @@ Docker Compose では `backend` と別の `node-monitor` サービスとして�
 GET /v1/nodes/{node_id}/state
 GET /v1/nodes/states?node_id=Spine1&node_id=Spine2
 GET /healthz
+GET /metrics
 ```
+
+状態 API は read-only です。`NODE_MONITOR_API_TOKEN` が設定されている場合、`/v1/nodes/*` と `/metrics` には `Authorization: Bearer <token>` が必要です。`/healthz` も同じ認証ミドルウェアの対象です。
 
 個別状態のレスポンス例です。
 
@@ -93,6 +152,17 @@ GET /healthz
 - 全体の同時プローブ数を制限し、タイムアウトと指数バックオフを設定する。
 - 定期監視とイベント起因確認には優先度を設け、後者を優先する。
 - `DOWN` 後も低頻度で再確認し、復旧を検出する。
+
+## 運用観測
+
+`/metrics` は Prometheus 互換のテキスト形式で、完了した確認数と状態遷移数を公開します。
+
+```text
+node_monitor_checks_total{state="UP"} 12
+node_monitor_state_changes_total{state="DOWN"} 1
+```
+
+状態が変化したときは `node_state_changed` イベントを JSON 形式でログ出力します。ログにはノード ID、変更前後の状態、判定理由が含まれます。`UNKNOWN` は装置停止を意味せず、未確認・期限切れ・プローブ不能、または node-monitor 自体の通信障害を表します。
 
 ## RCA との統合
 
@@ -166,6 +236,92 @@ RCA の同期パスからネットワーク I/O を排除します。状態が�
 
 完了条件: 監視サービス自身の異常と、装置の `UNKNOWN` を運用者が区別できる。
 
-## 最初の着手範囲
+## 追加実装計画: 状態変化のインシデント反映
 
-最初は Step 1 のみを実装します。実ネットワークへのプローブ、Docker Compose、RCA の挙動変更はまだ加えません。状態モデルとストアをテストで固めてから、外部 I/O を持つ Step 2 へ進みます。
+現在の Step 7 までの実装では、node-monitor の状態は定期観測され、backend が SYSLOG 受信時または RCA 実行時に参照します。node-monitor が先にノードの `DOWN` を検知した場合、既存の OPEN インシデントへ自動反映するイベント連携はまだありません。
+
+この機能は、node-monitor から backend へ状態変化だけを通知し、backend が関連するインシデントを更新する方式で追加します。RCA の同期処理からネットワーク I/O を発生させず、同じ状態変化の重複通知にも耐える設計にします。
+
+### Step 8: 状態変化イベント契約
+
+`UP`、`DOWN`、`DEGRADED`、`UNKNOWN` への変化時に、次のイベントを生成します。定期確認で状態が変わらない場合は通知しません。
+
+```json
+{
+  "event_id": "node-state-Spine2-20260904T100005Z-DOWN",
+  "event_type": "node_state.changed",
+  "node_id": "Spine2",
+  "previous_state": "UP",
+  "state": "DOWN",
+  "observed_at": "2026-09-04T10:00:05Z",
+  "reason": "Independent probes failed.",
+  "probes": []
+}
+```
+
+- `event_id` はノード、観測時刻、遷移後状態から決定的に生成し、重複処理に使う。
+- `UNKNOWN` への変化も通知するが、装置停止とは扱わない。
+- プローブの詳細は event payload に含め、backend が RCA evidence を再現できるようにする。
+
+完了条件: 状態変化ごとに一意なイベントが生成され、状態不変の定期確認ではイベントが増えない。
+
+実装済み: `NodeStateChangeEvent` を scheduler の状態遷移点で生成し、`event_id`、前後状態、観測時刻、理由、全プローブ結果を保持します。`NodeMonitor.drain_events()` で未配送イベントを取得でき、`on_state_change` コールバックで後続の配送 adapter に接続できます。状態が変化しない確認ではイベントを生成しません。
+
+### Step 9: backend へのイベント配送
+
+まずは node-monitor から backend への HTTP webhook を実装します。将来、複数 backend や高い配送耐久性が必要になった場合はメッセージキューへ置き換えられるよう、配送処理を adapter として分離します。
+
+- `NODE_MONITOR_EVENT_URL` と共有トークンを node-monitor 側だけに設定する。
+- backend に認証済み `POST /internal/node-state-events` を追加する。
+- 接続タイムアウト、再試行回数、指数バックオフ、送信キュー上限を設定する。
+- backend 停止中も観測処理を止めず、未送信イベントを保持できる仕組みを追加する。
+- backend は `event_id` を保存またはキャッシュし、同じイベントを二度適用しない。
+
+完了条件: backend が停止・再起動してもイベント配送が観測処理をブロックせず、再送された同一イベントが冪等に処理される。
+
+実装済み: `WebhookEventPublisher` が bounded queue と非同期 worker を使って `POST /internal/node-state-events` へ配送します。HTTP timeout/エラー時は指数バックオフで再試行し、キューが満杯の場合は観測処理をブロックせずイベントを破棄してメトリクス用カウンターを増やします。backend は `NODE_MONITOR_EVENT_TOKEN` を検証し、SQLite/PostgreSQL の `node_state_events.event_id` 主キーで重複イベントを冪等に受け付けます。イベント配送の共有トークンは通常のユーザー認証トークンとは分離しています。
+
+### Step 10: 関連インシデントの特定
+
+backend は状態変化を受信しただけで新規インシデントを作らず、次の順序で既存 OPEN インシデントを検索します。
+
+1. `root_cause_node == node_id` のインシデント
+2. `secondary_nodes` に `node_id` を含むインシデント
+3. トポロジー上の祖先・子孫と BGP peer Down の関連が確認できるインシデント
+
+該当するインシデントがない場合は、状態を node-monitor のスナップショットとして保持し、SYSLOG が後から到着したときに通常の RCA が参照できるようにします。状態変化だけで新規インシデントを作成するかどうかは、別の運用設定で明示します。
+
+完了条件: 同一ノードに複数の関連インシデントがある場合の選択規則が決まり、無関係なインシデントが更新されない。
+
+実装済み: `POST /internal/node-state-events` は、受信した状態イベントを新規登録した後、OPEN かつ未復旧のインシデントを `root_cause_node`、`secondary_nodes`、トポロジー上の祖先・子孫の順で検索します。レスポンスには `related_incident_ids` と `match_type` (`root_cause`、`secondary_node`、`topology`、`none`) を含めます。この段階ではインシデントの内容や状態は変更せず、状態イベントの関連先を確定する責務に限定しています。重複 `event_id` は再処理せず、冪等な accepted response を返します。
+
+### Step 11: RCA evidence とインシデント状態の更新
+
+`DOWN` のイベントを関連インシデントへ反映し、`RCAEvidence(source="node-monitor")` を追加または更新します。
+
+- `DOWN`: 停止確認の根拠、プローブ結果、観測時刻を追加し、RCA confidence を再計算する。
+- `DEGRADED`: 停止とは断定せず、劣化根拠だけを追加する。
+- `UNKNOWN`: 既存の停止根拠を上書きせず、観測不能として記録する。
+- `UP`: 復旧候補として記録するが、単独でインシデントを自動クローズしない。
+
+既存の SYSLOG evidence と node-monitor evidence を分離し、後から「SYSLOG が先だったのか、状態監視が先だったのか」を追跡できるようにします。更新時には `RCAEvaluationRecord` を作成し、WebSocket の `incident.updated` で UI へ通知します。
+
+完了条件: `DOWN`、`DEGRADED`、`UNKNOWN`、`UP` の各イベントが、関連インシデントの evidence、confidence、監査履歴へ正しく反映される。
+
+実装済み: 関連インシデントごとに `node-monitor` evidence を重複なく追加し、`DOWN` は confidence を 0.30、`DEGRADED` は 0.15 加算して再計算します。`DOWN`/`DEGRADED` のとき `ACTIVE` インシデントは `DEGRADED` へ更新します。`UNKNOWN` と `UP` は自動クローズせず、観測根拠と復旧候補として履歴に記録します。更新時は `RCAEvaluationRecord` を保存し、WebSocket の `incident.updated` を送信します。
+
+### Step 12: 復旧と運用テスト
+
+- `DOWN -> UP` では、復旧確認の quiet period と既存の recovery SYSLOG を組み合わせる。
+- node-monitor の停止、backend の停止、HTTP timeout、重複イベント、イベント順序逆転をテストする。
+- Spine 1 台停止時に複数 Leaf の BGP Down が到着する CLOS シナリオを統合テストする。
+- UI で「装置 DOWN」と「node-monitor unavailable / UNKNOWN」を区別して表示する。
+- イベント配送遅延、失敗率、再送数、適用済み・重複イベント数をメトリクスへ追加する。
+
+完了条件: Spine 停止を node-monitor が先に検知しても、関連インシデントが一件に集約され、復旧時に誤クローズや重複更新が発生しない。
+
+実装済み: node-monitor の `UP` は `DEGRADED -> RECOVERING` として扱い、quiet period 経過後に `RECOVERED` へ遷移します。`UP` だけで即時クローズはしません。イベントはノード単位の観測時刻で順序管理し、重複イベントは再処理せず、古いイベントは `STALE` として受け付けるだけでインシデントを巻き戻しません。webhook worker の停止時は未配送キューを破棄して shutdown を阻害しないため、backend 停止やモニター停止でもプローブ処理の終了を妨げません。
+
+## 実装状況
+
+Step 1 から Step 12 まで実装済みです。現在の実装は ICMP/TCP による無認証の到達性確認を対象とし、SSH/NETCONF によるログイン確認はまだ実施しません。将来追加する場合も、別プローブとして認証情報、読み取り専用コマンド、接続制限を分離します。

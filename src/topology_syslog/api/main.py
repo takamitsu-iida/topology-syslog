@@ -20,6 +20,7 @@ from topology_syslog.api.routes.ingest import router as ingest_router
 from topology_syslog.api.routes.investigation import router as investigation_router
 from topology_syslog.api.routes.knowledge import router as knowledge_router
 from topology_syslog.api.routes.node_states import router as node_states_router
+from topology_syslog.api.routes.node_state_events import router as node_state_events_router
 from topology_syslog.api.routes.raw_logs import router as raw_logs_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
@@ -37,6 +38,7 @@ from topology_syslog.persistence.investigation_store import InvestigationStore
 from topology_syslog.persistence.knowledge_audit_store import KnowledgeAuditStore
 from topology_syslog.persistence.raw_log_store import RawLogStore
 from topology_syslog.persistence.unknown_event_store import UnknownEventStore
+from topology_syslog.persistence.node_state_event_store import NodeStateEventStore
 from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
@@ -280,6 +282,7 @@ def create_app(
     auth_admin_token: str | None = None,
     node_monitor_url: str | None = None,
     node_monitor_token: str | None = None,
+    node_monitor_event_token: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -320,6 +323,8 @@ def create_app(
         else:
             app.state.vigil_notifier = None
         app.state.node_state_reader = None
+        app.state.node_monitor_event_token = node_monitor_event_token
+        app.state.node_state_event_store = NodeStateEventStore(database_url)
         if node_monitor_url:
             from topology_syslog.node_monitor.client import HttpNodeStateReader
             app.state.node_state_reader = HttpNodeStateReader(node_monitor_url, auth_token=node_monitor_token)
@@ -469,4 +474,5 @@ def create_app(
     app.include_router(investigation_router)
     app.include_router(knowledge_router)
     app.include_router(node_states_router)
+    app.include_router(node_state_events_router)
     return app

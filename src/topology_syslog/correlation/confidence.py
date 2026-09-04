@@ -45,8 +45,10 @@ def _score_evidence(evidence: RCAEvidence, messages: list[SyslogMessage]) -> flo
         return 0.05
     if evidence.source == "investigation":
         return 0.15
-    if evidence.source == "node-monitor" and "is DOWN" in evidence.summary:
+    if evidence.source == "node-monitor" and "is down" in summary:
         return 0.30
+    if evidence.source == "node-monitor" and "is degraded" in summary:
+        return 0.15
     return 0.0
 
 

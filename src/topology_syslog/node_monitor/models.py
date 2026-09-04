@@ -32,3 +32,15 @@ class NodeStateRecord:
     reason: str = ""
     probes: tuple[ProbeResult, ...] = field(default_factory=tuple)
     monitor_id: str | None = None
+
+
+@dataclass(frozen=True)
+class NodeStateChangeEvent:
+    event_id: str
+    event_type: str
+    node_id: str
+    previous_state: NodeState
+    state: NodeState
+    observed_at: datetime
+    reason: str
+    probes: tuple[ProbeResult, ...] = field(default_factory=tuple)

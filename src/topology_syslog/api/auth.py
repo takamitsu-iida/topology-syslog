@@ -43,7 +43,11 @@ class AuthMiddleware:
         self.config = config
 
     async def __call__(self, scope: dict, receive: Callable[[], Awaitable[dict]], send: Callable[[dict], Awaitable[None]]) -> None:
-        if not self.config.enabled or scope["type"] not in {"http", "websocket"}:
+        if (
+            not self.config.enabled
+            or scope["type"] not in {"http", "websocket"}
+            or scope.get("path") == "/internal/node-state-events"
+        ):
             await self.app(scope, receive, send)
             return
 

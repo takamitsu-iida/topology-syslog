@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Query, Response
 from pydantic import BaseModel
@@ -36,6 +37,8 @@ def create_app(
     *,
     interval_sec: float = 30.0,
     auth_token: str | None = None,
+    on_startup: Callable[[], Awaitable[None]] | None = None,
+    on_shutdown: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     if interval_sec <= 0:
         raise ValueError("interval_sec must be greater than zero")
@@ -43,6 +46,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         stop_event = asyncio.Event()
+        if on_startup is not None:
+            await on_startup()
         task = asyncio.create_task(monitor.run_periodically(interval_sec, stop_event))
         app.state.monitor = monitor
         try:
@@ -50,6 +55,8 @@ def create_app(
         finally:
             stop_event.set()
             await task
+            if on_shutdown is not None:
+                await on_shutdown()
 
     app = FastAPI(title="Topology Syslog Node Monitor", version="0.1.0", lifespan=lifespan)
     app.add_middleware(AuthMiddleware, config=AuthConfig(auth_token is not None, {"reader": auth_token}))

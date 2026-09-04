@@ -122,3 +122,45 @@ def test_failed_check_uses_exponential_backoff_before_retrying():
     asyncio.run(monitor.check("Spine2"))
 
     assert probe.calls == 2
+
+
+def test_state_change_event_contains_transition_and_probe_details():
+    probe = _Probe("icmp", True)
+    monitor = _monitor([probe])
+
+    asyncio.run(monitor.check("Spine2"))
+    events = monitor.drain_events()
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_id.startswith("node-state-Spine2-")
+    assert event.event_type == "node_state.changed"
+    assert event.previous_state == NodeState.UNKNOWN
+    assert event.state == NodeState.UP
+    assert event.probes[0].probe_type == "icmp"
+    assert monitor.drain_events() == []
+
+
+def test_state_unchanged_check_does_not_generate_another_event():
+    probe = _Probe("icmp", True)
+    monitor = _monitor([probe])
+
+    asyncio.run(monitor.check("Spine2"))
+    monitor.drain_events()
+    asyncio.run(monitor.check("Spine2"))
+
+    assert monitor.drain_events() == []
+
+
+def test_state_change_callback_receives_event():
+    probe = _Probe("icmp", True)
+    received = []
+    monitor = NodeMonitor(
+        InMemoryNodeStateStore(), (probe,), clock=lambda: _NOW,
+        on_state_change=received.append,
+    )
+    monitor.register_target("Spine2", "10.0.0.2")
+
+    asyncio.run(monitor.check("Spine2"))
+
+    assert received == monitor.drain_events()

@@ -11,6 +11,7 @@ from topology_syslog.node_monitor.probes import IcmpProbe, TcpProbe
 from topology_syslog.node_monitor.scheduler import NodeMonitor
 from topology_syslog.node_monitor.store import InMemoryNodeStateStore
 from topology_syslog.node_monitor.topology import resolve_monitor_targets
+from topology_syslog.node_monitor.webhook import WebhookEventPublisher
 from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader
 
@@ -62,12 +63,27 @@ def main() -> None:
     for node_id, address in targets.items():
         monitor.register_target(node_id, address)
 
-    uvicorn.run(
-        create_app(
+    publisher = None
+    event_url = os.getenv("NODE_MONITOR_EVENT_URL")
+    if event_url:
+        publisher = WebhookEventPublisher(
+            event_url,
+            token=os.getenv("NODE_MONITOR_EVENT_TOKEN", ""),
+            timeout_sec=float(os.getenv("NODE_MONITOR_EVENT_TIMEOUT_SEC", "2")),
+            max_retries=int(os.getenv("NODE_MONITOR_EVENT_MAX_RETRIES", "3")),
+            queue_size=int(os.getenv("NODE_MONITOR_EVENT_QUEUE_SIZE", "1000")),
+        )
+        monitor._on_state_change = publisher.publish
+
+    app = create_app(
             monitor,
             interval_sec=float(os.getenv("NODE_MONITOR_INTERVAL_SEC", "30")),
             auth_token=os.getenv("NODE_MONITOR_API_TOKEN") or None,
-        ),
+            on_startup=publisher.start if publisher else None,
+            on_shutdown=publisher.close if publisher else None,
+        )
+    uvicorn.run(
+        app,
         host=os.getenv("NODE_MONITOR_HOST", "0.0.0.0"),
         port=int(os.getenv("NODE_MONITOR_PORT", "8090")),
         log_level=os.getenv("LOG_LEVEL", "info").lower(),

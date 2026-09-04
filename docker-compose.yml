@@ -19,7 +19,10 @@ services:
       AUTH_ENABLED: "true"
       CORS_ORIGINS: "http://localhost:3000"
       NODE_MONITOR_URL: "http://node-monitor:8090"
+      NODE_MONITOR_EVENT_TOKEN: "${NODE_MONITOR_EVENT_TOKEN:?set NODE_MONITOR_EVENT_TOKEN in .env}"
       NODE_MONITOR_API_TOKEN: "${NODE_MONITOR_API_TOKEN:?set NODE_MONITOR_API_TOKEN in .env}"
+      NODE_MONITOR_EVENT_URL: "http://backend:8080/internal/node-state-events"
+      NODE_MONITOR_EVENT_TOKEN: "${NODE_MONITOR_EVENT_TOKEN:?set NODE_MONITOR_EVENT_TOKEN in .env}"
     volumes:
       - ./configs:/app/configs:ro  # トポロジー定義（読み取り専用）
       - data:/data                  # incidents.db と .chromadb を永続化
