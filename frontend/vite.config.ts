@@ -34,7 +34,7 @@ export default defineConfig({
       '/node-states': 'http://127.0.0.1:8080',
       '/ingest':    'http://127.0.0.1:8080',
       '/filter':    'http://127.0.0.1:8080',
-      '/knowledge': 'http://127.0.0.1:8080',
+      '^/knowledge/.+': 'http://127.0.0.1:8080',
       '/raw-logs': {
         target: 'http://127.0.0.1:8080',
         bypass(req) {
