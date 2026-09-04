@@ -189,10 +189,12 @@ export interface KnowledgeRule {
 export interface KnowledgeRuleInput {
   rule_id: string
   signature: string
+  description?: string
   vendor?: string
   classification?: string
   correlation_role?: string
   severity_policy?: Record<string, string>
+  dedup_window_sec?: number
   runbook?: string[]
   confidence?: number
   priority?: number
