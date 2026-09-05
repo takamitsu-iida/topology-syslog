@@ -6,11 +6,11 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from topology_syslog.api.main import _process_message_immediately, create_app
+from topology_syslog.api.main import _can_create_inferred_incident, _process_message_immediately, create_app
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.file_ingest import run_batch
 from topology_syslog.ingestion.syslog_parser import parse
-from topology_syslog.models import Incident
+from topology_syslog.models import EventAction, EventClassification, EventClassificationResult, Incident
 from topology_syslog.persistence.incident_store import IncidentStore
 
 # RFC 3164 形式のテスト用シスログ行
@@ -46,6 +46,41 @@ def test_ingest_chain_creates_one_incident(client):
     assert len(incidents) == 1
     assert incidents[0]["root_cause_node"] == "Core-Router1"
     assert set(incidents[0]["secondary_nodes"]) == {"Dist-Switch1", "Access-SW1"}
+
+
+def test_silent_root_incident_is_allowed_for_correlate_only_event():
+    incident = Incident(
+        incident_id="INC-SILENT-001",
+        created_at=datetime.now(tz=timezone.utc),
+        root_cause_node="Spine2",
+        primary_event="(inferred — node did not send SYSLOG)",
+    )
+    classification = EventClassificationResult(
+        classification=EventClassification.STATE_CHANGE,
+        action=EventAction.CORRELATE_ONLY,
+    )
+
+    assert _can_create_inferred_incident(incident, classification, enforce=True)
+
+
+def test_ingest_creates_silent_spine2_incident_from_leaf2_bgp():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+    )
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [{
+            "source_ip": "127.0.0.1",
+            "raw": "<37>Sep 5 06:07:25 Leaf2 %BGP-5-ADJCHANGE: neighbor 10.2.12.1 Down BGP Notification sent",
+        }]})
+
+    assert response.status_code == 200
+    incidents = response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["root_cause_node"] == "Spine2"
+    assert incidents[0]["secondary_nodes"] == ["Leaf2"]
 
 
 def test_ingest_unknown_hosts_returns_empty(client):

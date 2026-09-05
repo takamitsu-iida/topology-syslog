@@ -46,6 +46,7 @@ _logger = logging.getLogger(__name__)
 
 
 _ROUTING_PREFIXES = ("%BGP-", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-")
+_SILENT_ROOT_EVENT = "(inferred — node did not send SYSLOG)"
 
 
 def _burst_detected(
@@ -66,6 +67,12 @@ def _has_routing_events(buffer: list) -> bool:
         any(p in m.message for p in _ROUTING_PREFIXES)
         for m in buffer
     )
+
+
+def _can_create_inferred_incident(incident, classification_result, *, enforce: bool) -> bool:
+    if incident.primary_event == _SILENT_ROOT_EVENT:
+        return True
+    return can_create_new_incident(classification_result, enforce=enforce)
 
 
 async def _process_message_immediately(app: FastAPI, msg) -> list:
@@ -153,7 +160,9 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
         decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
 
         if decision.action == MergeAction.NEW:
-            if not can_create_new_incident(classification_result, enforce=classification_enforced):
+            if not _can_create_inferred_incident(
+                inc, classification_result, enforce=classification_enforced
+            ):
                 _logger.debug(
                     "Suppressing new incident for non-fault SYSLOG: signature=%s classification=%s action=%s",
                     msg.normalized_signature,
