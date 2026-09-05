@@ -110,6 +110,37 @@ def test_ingest_creates_silent_leaf2_incident_from_both_spines_bgp():
     assert incidents[0]["raw_log_count"] == 2
 
 
+def test_ingest_does_not_promote_known_secondary_over_leaf2_root_cause():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+    )
+    with TestClient(app) as client:
+        initial = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<37>Sep 5 06:53:33 Spine2 %BGP-5-ADJCHANGE: neighbor 10.2.12.2 Down BGP Notification sent",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<37>Sep 5 06:53:36 Spine1 %BGP-5-ADJCHANGE: neighbor 10.1.12.2 Down BGP Notification sent",
+            },
+        ]})
+        later = client.post("/ingest", json={"messages": [{
+            "source_ip": "127.0.0.1",
+            "raw": "<37>Sep 5 06:54:00 Leaf2 %BGP-5-ADJCHANGE: neighbor 10.2.12.1 Down BGP Notification sent",
+        }]})
+
+    assert initial.status_code == 200
+    assert later.status_code == 200
+    assert len(later.json()) == 1
+    incident = later.json()[0]
+    assert incident["root_cause_node"] == "Leaf2"
+    assert set(incident["secondary_nodes"]) == {"Spine1", "Spine2"}
+
+
 def test_ingest_creates_silent_leaf3_incident_from_spine_session_removal():
     app = create_app(
         database_url="sqlite:///:memory:",

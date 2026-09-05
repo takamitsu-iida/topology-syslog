@@ -37,6 +37,8 @@ class IncidentMerger:
 
         for existing in open_incidents:
             if self._is_ancestor(candidate.root_cause_node, existing.root_cause_node, graph):
+                if candidate.root_cause_node in existing.secondary_nodes:
+                    return MergeDecision(MergeAction.APPEND, existing)
                 return MergeDecision(MergeAction.PROMOTE_ROOT, existing)
 
         return MergeDecision(MergeAction.NEW)
@@ -47,7 +49,10 @@ class IncidentMerger:
         candidate: Incident,
         graph: GraphEngine,
     ) -> Incident:
-        if self._is_ancestor(candidate.root_cause_node, target.root_cause_node, graph):
+        if (
+            self._is_ancestor(candidate.root_cause_node, target.root_cause_node, graph)
+            and candidate.root_cause_node not in target.secondary_nodes
+        ):
             old_root = target.root_cause_node
             target.root_cause_node = candidate.root_cause_node
             target.primary_event = candidate.primary_event

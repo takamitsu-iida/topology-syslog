@@ -324,6 +324,30 @@ def test_explicit_bgp_down_peer_becomes_silent_root_cause_even_if_monitor_is_up(
     assert incidents[0].root_cause_node == "Spine2"
 
 
+def test_monitored_down_leaf_is_prioritized_over_spine_bgp_candidate():
+    g = nx.DiGraph()
+    g.add_node("Spine2", role="spine", addresses={"10.2.12.1"})
+    g.add_node("Leaf2", role="leaf", addresses={"10.2.12.2"})
+    g.add_edge("Spine2", "Leaf2", edge_type="physical")
+    engine = GraphEngine(g)
+
+    class _Leaf2DownReader:
+        def get(self, node_id: str, *, now=None) -> NodeStateRecord:
+            observed_at = datetime.now(tz=timezone.utc)
+            state = NodeState.DOWN if node_id == "Leaf2" else NodeState.UP
+            return NodeStateRecord(node_id, state, observed_at, observed_at, "test monitor result")
+
+    incidents = RootCauseInferencer(node_state_reader=_Leaf2DownReader()).infer([
+        _msg("Spine2", "%BGP-5-ADJCHANGE: neighbor down"),
+    ], engine)
+
+    assert len(incidents) == 1
+    incident = incidents[0]
+    assert incident.root_cause_node == "Leaf2"
+    assert incident.secondary_nodes == ["Spine2"]
+    assert any(evidence.source == "node-monitor" for evidence in incident.rca_explanation.primary_candidate.evidences)
+
+
 def test_silent_root_cause_coexists_with_independent_incident():
     """サイレント根本原因インシデントと独立インシデントが同一ウィンドウ内で共存する"""
     g = nx.DiGraph()

@@ -110,6 +110,27 @@ def _find_explicit_silent_root_candidates(
     return candidates
 
 
+def _find_monitored_down_root_candidates(
+    active_nodes: set[str],
+    graph: GraphEngine,
+    node_state_reader: NodeStateReader | None,
+) -> dict[str, set[str]]:
+    if node_state_reader is None:
+        return {}
+    related_nodes: set[str] = set()
+    for node in active_nodes:
+        related_nodes.update(graph.get_direct_neighbors(node))
+    candidates: dict[str, set[str]] = {}
+    for node in sorted(related_nodes):
+        if node_state_reader.get(node).state != NodeState.DOWN:
+            continue
+        candidates[node] = {
+            active_node for active_node in active_nodes
+            if node in graph.get_direct_neighbors(active_node)
+        }
+    return candidates
+
+
 def _build_rca_explanation(
     root_cause_node: str,
     secondary_nodes: list[str],
@@ -241,6 +262,9 @@ class RootCauseInferencer:
             m.hostname for m in active
             if graph.node_exists(m.hostname) and _is_routing_event(m.message)
         )
+        monitored_down_roots = _find_monitored_down_root_candidates(
+            active_nodes, graph, self._node_state_reader
+        )
 
         # ノードごとの最初のログ受信時刻
         first_seen: dict[str, datetime] = {}
@@ -256,6 +280,32 @@ class RootCauseInferencer:
              if not graph.get_ancestors_filtered(n, bgp_nodes).intersection(active_nodes)),
             key=lambda n: first_seen.get(n, now),
         )
+
+        # node-monitor が直接関連ノードの DOWN を確認した場合は最優先する
+        for src, covered_nodes in monitored_down_roots.items():
+            covered = sorted(covered_nodes - assigned)
+            related = {src, *covered}
+            related_msgs = [m for m in messages if m.hostname in related]
+            incidents.append(Incident(
+                incident_id=self._new_id(date_str),
+                created_at=now,
+                root_cause_node=src,
+                primary_event=_SILENT_EVENT,
+                secondary_nodes=covered,
+                raw_log_count=len(related_msgs),
+                raw_logs=[m.message for m in related_msgs],
+                status="OPEN",
+                rca_explanation=_build_rca_explanation(
+                    src,
+                    covered,
+                    related_msgs,
+                    graph,
+                    bgp_nodes,
+                    silent=True,
+                    node_state=self._node_state_reader.get(src),
+                ),
+            ))
+            assigned.update(related)
 
         # フラッピング検出: 正規推論の前に処理して assigned に追加
         if self._flapping_threshold > 0:
