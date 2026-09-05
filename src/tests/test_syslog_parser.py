@@ -15,6 +15,13 @@ def test_rfc3164_cisco_event_type():
     assert msg.event_type == "%LINK-3-UPDOWN"
 
 
+def test_rfc3164_cisco_fractional_seconds():
+    raw = b"<37>Sep 5 07:05:53.510 Spine2 %BGP_SESSION-5-ADJCHANGE: neighbor 10.2.13.2 removed from session"
+    msg = parse(raw, "192.168.1.1")
+    assert msg.hostname == "Spine2"
+    assert msg.event_type == "%BGP_SESSION-5-ADJCHANGE"
+
+
 def test_rfc3164_no_cisco_event():
     raw = b"<34>Aug 15 10:00:00 router1 kernel: eth0 entered promiscuous mode"
     msg = parse(raw, "10.0.0.1")

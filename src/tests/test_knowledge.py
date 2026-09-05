@@ -56,6 +56,13 @@ def test_parser_normalizes_cisco_event_without_severity():
     assert msg.vendor == "cisco-ios"
     assert msg.normalized_signature == "%BGP-*-ADJCHANGE"
 
+    session_msg = parse(
+        b"<37>Sep 5 07:05:53.510 Spine2 %BGP_SESSION-5-ADJCHANGE: neighbor 10.2.13.2 removed from session",
+        "10.0.0.2",
+    )
+    assert session_msg.vendor == "cisco-ios"
+    assert session_msg.normalized_signature == "%BGP_SESSION-*-ADJCHANGE"
+
 
 def test_matcher_applies_only_approved_rule(tmp_path):
     (tmp_path / "rules.yaml").write_text(

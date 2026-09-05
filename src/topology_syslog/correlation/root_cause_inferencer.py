@@ -19,12 +19,15 @@ from topology_syslog.topology.graph_engine import GraphEngine
 
 # BGP エッジを有効化するルーティングプロトコル識別子
 _ROUTING_PREFIXES: frozenset[str] = frozenset([
-    "%BGP-", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-",
+    "%BGP", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-",
 ])
 
 # Cisco IOS %FAC-SEV-MNEM 抽出
 _CISCO_EVENT_RE = re.compile(r'%[A-Z0-9_]+-\d+-[A-Z0-9_]+')
-_BGP_NEIGHBOR_DOWN_RE = re.compile(r'\bneighbor\s+(\S+)\s+down\b', re.IGNORECASE)
+_BGP_NEIGHBOR_LOST_RE = re.compile(
+    r'\bneighbor\s+(\S+)(?:\s+\S+){0,4}?\s+(?:down\b|topology\s+\S+\s+removed\s+from\s+session\b)',
+    re.IGNORECASE,
+)
 
 
 def _extract_event_type(message: str) -> str | None:
@@ -93,10 +96,10 @@ def _find_explicit_silent_root_candidates(
     active_nodes: set[str],
     graph: GraphEngine,
 ) -> dict[str, set[str]]:
-    """BGP neighbor down に明示された、無発報の直接隣接 peer を返す。"""
+    """BGP peer loss で明示された、無発報の直接隣接 peer を返す。"""
     candidates: dict[str, set[str]] = {}
     for message in active:
-        match = _BGP_NEIGHBOR_DOWN_RE.search(message.message)
+        match = _BGP_NEIGHBOR_LOST_RE.search(message.message)
         if match is None:
             continue
         peer = graph.find_node_by_address(match.group(1))

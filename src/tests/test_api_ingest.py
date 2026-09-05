@@ -110,6 +110,30 @@ def test_ingest_creates_silent_leaf2_incident_from_both_spines_bgp():
     assert incidents[0]["raw_log_count"] == 2
 
 
+def test_ingest_creates_silent_leaf3_incident_from_spine_session_removal():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+    )
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [{
+            "source_ip": "127.0.0.1",
+            "raw": (
+                "<37>Sep 5 07:05:53.510 Spine2 %BGP_SESSION-5-ADJCHANGE: "
+                "neighbor 10.2.13.2 IPv4 Unicast topology base removed from session BGP "
+                "Notification sent"
+            ),
+        }]})
+
+    assert response.status_code == 200
+    incidents = response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["root_cause_node"] == "Leaf3"
+    assert incidents[0]["secondary_nodes"] == ["Spine2"]
+
+
 def test_ingest_unknown_hosts_returns_empty(client):
     resp = client.post("/ingest", json={"messages": [
         {"source_ip": "1.2.3.4", "raw": "<34>Aug 16 10:00:00 Ghost1 some error"},

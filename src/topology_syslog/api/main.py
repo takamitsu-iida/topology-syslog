@@ -45,7 +45,7 @@ from topology_syslog.topology.yang_loader import TopologyLoader, device_severity
 _logger = logging.getLogger(__name__)
 
 
-_ROUTING_PREFIXES = ("%BGP-", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-")
+_ROUTING_PREFIXES = ("%BGP", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-")
 _SILENT_ROOT_EVENT = "(inferred — node did not send SYSLOG)"
 
 

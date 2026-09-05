@@ -42,7 +42,7 @@ rules:
   - id: cisco-bgp-adjchange
     description: "BGP ネイバーの隣接状態変化。上流リンクまたは対向装置の障害に伴う二次影響として扱う。"
     vendor: cisco-ios
-    signature: "%BGP-*-ADJCHANGE"
+    signature: "%BGP*-ADJCHANGE"
     classification: bgp-adjacency-change
     correlation_role: secondary-impact
     severity_policy:
