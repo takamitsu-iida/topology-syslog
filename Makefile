@@ -11,6 +11,7 @@ API_HOST        ?= 0.0.0.0
 API_PORT        ?= 8080
 SYSLOG_HOST     ?= 0.0.0.0
 SYSLOG_PORT     ?= 1514
+RCA_ENGINE      ?= hypothesis
 NODE_MONITOR_HOST ?= 0.0.0.0
 NODE_MONITOR_PORT ?= 8090
 NODE_MONITOR_URL  ?= http://127.0.0.1:$(NODE_MONITOR_PORT)
@@ -80,6 +81,7 @@ start-api: | $(PID_DIR) $(LOG_DIR)
 		API_PORT=$(API_PORT) \
 		SYSLOG_HOST=$(SYSLOG_HOST) \
 		SYSLOG_PORT=$(SYSLOG_PORT) \
+		RCA_ENGINE=$(RCA_ENGINE) \
 		NODE_MONITOR_URL=$(NODE_MONITOR_URL) \
 		uv run $(ENV_FILE_ARG) python -m topology_syslog >"$(CURDIR)/$(API_LOG)" 2>&1 & echo $$! >"$(CURDIR)/$(API_PID)"; \
 		echo "API started (PID $$(cat $(API_PID))) — log: $(API_LOG)"; \

@@ -45,6 +45,9 @@ def _run_ingest(args: argparse.Namespace) -> None:
     correlation_mode = os.getenv("CORRELATION_MODE", "immediate").lower()
     if correlation_mode not in {"immediate", "time_window"}:
         raise ValueError("CORRELATION_MODE must be one of: immediate, time_window")
+    rca_engine = os.getenv("RCA_ENGINE", "hypothesis").lower()
+    if rca_engine not in {"legacy", "hypothesis", "dual"}:
+        raise ValueError("RCA_ENGINE must be one of: legacy, hypothesis, dual")
 
     legacy_keys = [
         key for key in ("WINDOW_SEC", "BURST_WINDOW_SEC", "BURST_THRESHOLD", "WINDOW_EXTEND_FACTOR", "WINDOW_SEC_MAX")
@@ -214,6 +217,7 @@ def main() -> None:
         syslog_host=os.getenv("SYSLOG_HOST", "0.0.0.0"),
         syslog_port=int(os.getenv("SYSLOG_PORT", "1514")),
         correlation_mode=correlation_mode,
+        rca_engine=rca_engine,
         window_sec=int(os.getenv("WINDOW_SEC", "30")),
         burst_window_sec=float(os.getenv("BURST_WINDOW_SEC", "5.0")),
         burst_threshold=int(os.getenv("BURST_THRESHOLD", "3")),

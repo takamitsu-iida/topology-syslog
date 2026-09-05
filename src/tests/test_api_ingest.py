@@ -276,7 +276,7 @@ def test_ingest_incident_id_format(client):
     assert len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit()
 
 
-def test_ingest_uses_immediate_pipeline_to_promote_existing_root_cause(client, app):
+def test_ingest_hypothesis_pipeline_creates_new_upstream_incident_instead_of_legacy_promotion(client, app):
     now = datetime.now(tz=timezone.utc)
     existing = Incident(
         incident_id="INC-OLD-001",
@@ -299,11 +299,11 @@ def test_ingest_uses_immediate_pipeline_to_promote_existing_root_cause(client, a
     ]})
 
     assert response.status_code == 200
-    assert response.json()[0]["incident_id"] == "INC-OLD-001"
-    merged = app.state.store.get_by_id("INC-OLD-001")
-    assert merged is not None
-    assert merged.root_cause_node == "Core-Router1"
-    assert "Dist-Switch1" in merged.secondary_nodes
+    assert response.json()[0]["incident_id"] != "INC-OLD-001"
+    assert response.json()[0]["root_cause_node"] == "Core-Router1"
+    unchanged = app.state.store.get_by_id("INC-OLD-001")
+    assert unchanged is not None
+    assert unchanged.root_cause_node == "Dist-Switch1"
 
 
 def test_ingest_creates_new_incident_when_related_open_incident_is_old(client, app):

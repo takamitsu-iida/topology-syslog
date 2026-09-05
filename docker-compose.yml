@@ -15,6 +15,7 @@ services:
       AI_RAG_PATH: "/data/.chromadb"
       TOPOLOGY_PATH: "configs/clos/yang_topology.yaml"
       TOPOLOGY_SOURCE: "iida-yaml"
+      RCA_ENGINE: "hypothesis"
       SKB_PATH: "configs/syslog_knowledge"
       AUTH_ENABLED: "true"
       CORS_ORIGINS: "http://localhost:3000"
@@ -22,7 +23,6 @@ services:
       NODE_MONITOR_EVENT_TOKEN: "${NODE_MONITOR_EVENT_TOKEN:?set NODE_MONITOR_EVENT_TOKEN in .env}"
       NODE_MONITOR_API_TOKEN: "${NODE_MONITOR_API_TOKEN:?set NODE_MONITOR_API_TOKEN in .env}"
       NODE_MONITOR_EVENT_URL: "http://backend:8080/internal/node-state-events"
-      NODE_MONITOR_EVENT_TOKEN: "${NODE_MONITOR_EVENT_TOKEN:?set NODE_MONITOR_EVENT_TOKEN in .env}"
     volumes:
       - ./configs:/app/configs:ro  # トポロジー定義（読み取り専用）
       - data:/data                  # incidents.db と .chromadb を永続化

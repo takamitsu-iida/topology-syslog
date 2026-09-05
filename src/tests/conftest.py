@@ -13,16 +13,36 @@ POC_TOPOLOGY = {
     "network-model": {
         "physical-layer": {
             "device": [
-                {"device-id": "Core-Router1", "role": "core"},
-                {"device-id": "Dist-Switch1", "role": "distribution"},
-                {"device-id": "Access-SW1", "role": "access"},
-                {"device-id": "Branch-Router2", "role": "core"},
-                {"device-id": "Branch-Access-SW1", "role": "access"},
+                {
+                    "device-id": "Core-Router1",
+                    "role": "core",
+                    "interface": [{"interface-id": "GE0/0"}],
+                },
+                {
+                    "device-id": "Dist-Switch1",
+                    "role": "distribution",
+                    "interface": [{"interface-id": "GE0/0"}, {"interface-id": "GE0/1"}],
+                },
+                {
+                    "device-id": "Access-SW1",
+                    "role": "access",
+                    "interface": [{"interface-id": "GE0/0"}],
+                },
+                {
+                    "device-id": "Branch-Router2",
+                    "role": "core",
+                    "interface": [{"interface-id": "GE0/0"}],
+                },
+                {
+                    "device-id": "Branch-Access-SW1",
+                    "role": "access",
+                    "interface": [{"interface-id": "GE0/0"}],
+                },
             ],
             "physical-connection": [
-                {"endpoint": [{"device-id": "Core-Router1"}, {"device-id": "Dist-Switch1"}]},
-                {"endpoint": [{"device-id": "Dist-Switch1"}, {"device-id": "Access-SW1"}]},
-                {"endpoint": [{"device-id": "Branch-Router2"}, {"device-id": "Branch-Access-SW1"}]},
+                {"endpoint": [{"device-id": "Core-Router1", "interface-id": "GE0/0"}, {"device-id": "Dist-Switch1", "interface-id": "GE0/0"}]},
+                {"endpoint": [{"device-id": "Dist-Switch1", "interface-id": "GE0/1"}, {"device-id": "Access-SW1", "interface-id": "GE0/0"}]},
+                {"endpoint": [{"device-id": "Branch-Router2", "interface-id": "GE0/0"}, {"device-id": "Branch-Access-SW1", "interface-id": "GE0/0"}]},
             ],
         }
     }
