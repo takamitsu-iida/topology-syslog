@@ -25,7 +25,7 @@ _ROUTING_PREFIXES: frozenset[str] = frozenset([
 # Cisco IOS %FAC-SEV-MNEM 抽出
 _CISCO_EVENT_RE = re.compile(r'%[A-Z0-9_]+-\d+-[A-Z0-9_]+')
 _BGP_NEIGHBOR_LOST_RE = re.compile(
-    r'\bneighbor\s+(\S+)(?:\s+\S+){0,4}?\s+(?:down\b|topology\s+\S+\s+removed\s+from\s+session\b)',
+    r'\b(?:sent\s+to\s+neighbor|neighbor)\s+(\S+)(?:\s+\S+){0,6}?\s+(?:down\b|reset\b|\(?hold\s+time\s+expired\)?|topology\s+\S+\s+removed\s+from\s+session\b)',
     re.IGNORECASE,
 )
 

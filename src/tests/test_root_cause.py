@@ -282,6 +282,32 @@ def test_silent_leaf_inferred_from_spines_reporting_named_peer_down():
     assert incidents[0].primary_event == "(inferred \u2014 node did not send SYSLOG)"
 
 
+def test_leaf_shutdown_inferred_from_spine_bgp_notification_sequence():
+    """Spine 側の BGP Notification 系ログだけでも peer の Leaf を根本原因にする。"""
+    g = nx.DiGraph()
+    g.add_node("Spine1", role="spine")
+    g.add_node("Spine2", role="spine")
+    g.add_node("Leaf3", role="leaf", addresses={"10.1.13.2", "10.2.13.2"})
+    g.add_edge("Spine1", "Leaf3", edge_type="physical")
+    g.add_edge("Spine2", "Leaf3", edge_type="physical")
+    engine = GraphEngine(g)
+
+    incidents = RootCauseInferencer().infer([
+        _msg("Spine2", "%BGP-5-ADJCHANGE: neighbor 10.2.13.2 Down BGP Notification sent"),
+        _msg("Spine2", "%BGP_SESSION-5-ADJCHANGE: neighbor 10.2.13.2 IPv4 Unicast topology base removed from session BGP Notification sent"),
+        _msg("Spine1", "%BGP-3-NOTIFICATION: sent to neighbor 10.1.13.2 4/0 (hold time expired) 0 bytes"),
+        _msg("Spine1", "%BGP-5-NBR_RESET: Neighbor 10.1.13.2 reset (BGP Notification sent)"),
+        _msg("Spine1", "%BGP-5-ADJCHANGE: neighbor 10.1.13.2 Down BGP Notification sent"),
+        _msg("Spine1", "%BGP_SESSION-5-ADJCHANGE: neighbor 10.1.13.2 IPv4 Unicast topology base removed from session BGP Notification sent"),
+    ], engine)
+
+    assert len(incidents) == 1
+    incident = incidents[0]
+    assert incident.root_cause_node == "Leaf3"
+    assert incident.secondary_nodes == ["Spine1", "Spine2"]
+    assert incident.primary_event == "(inferred \u2014 node did not send SYSLOG)"
+
+
 class _NodeStateReader:
     def __init__(self, state: NodeState) -> None:
         self._state = state

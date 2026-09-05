@@ -165,6 +165,55 @@ def test_ingest_creates_silent_leaf3_incident_from_spine_session_removal():
     assert incidents[0]["secondary_nodes"] == ["Spine2"]
 
 
+def test_ingest_keeps_leaf3_root_for_spine_bgp_notification_sequence():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+    )
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<37>Sep 5 07:35:11.718 Spine2 %BGP-5-ADJCHANGE: neighbor 10.2.13.2 Down BGP Notification sent",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": (
+                    "<37>Sep 5 07:35:11.718 Spine2 %BGP_SESSION-5-ADJCHANGE: "
+                    "neighbor 10.2.13.2 IPv4 Unicast topology base removed from session BGP Notification sent"
+                ),
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 07:35:14.898 Spine1 %BGP-3-NOTIFICATION: sent to neighbor 10.1.13.2 4/0 (hold time expired) 0 bytes",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<37>Sep 5 07:35:14.898 Spine1 %BGP-5-NBR_RESET: Neighbor 10.1.13.2 reset (BGP Notification sent)",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<37>Sep 5 07:35:14.899 Spine1 %BGP-5-ADJCHANGE: neighbor 10.1.13.2 Down BGP Notification sent",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": (
+                    "<37>Sep 5 07:35:14.899 Spine1 %BGP_SESSION-5-ADJCHANGE: "
+                    "neighbor 10.1.13.2 IPv4 Unicast topology base removed from session BGP Notification sent"
+                ),
+            },
+        ]})
+
+    assert response.status_code == 200
+    incidents = response.json()
+    assert len(incidents) == 1
+    incident = incidents[0]
+    assert incident["root_cause_node"] == "Leaf3"
+    assert set(incident["secondary_nodes"]) == {"Spine1", "Spine2"}
+
+
 def test_ingest_unknown_hosts_returns_empty(client):
     resp = client.post("/ingest", json={"messages": [
         {"source_ip": "1.2.3.4", "raw": "<34>Aug 16 10:00:00 Ghost1 some error"},
