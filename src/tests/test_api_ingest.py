@@ -214,6 +214,36 @@ def test_ingest_keeps_leaf3_root_for_spine_bgp_notification_sequence():
     assert set(incident["secondary_nodes"]) == {"Spine1", "Spine2"}
 
 
+def test_ingest_interface_flap_uses_spine1_as_logged_root_cause():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+    )
+    messages = [
+        "<37>Sep 5 08:13:06.231 Spine1 %BGP-5-NBR_RESET: Neighbor 10.1.12.2 reset (Interface flap)",
+        "<37>Sep 5 08:13:06.232 Spine1 %BGP-5-ADJCHANGE: neighbor 10.1.12.2 Down Interface flap",
+        "<37>Sep 5 08:13:06.232 Spine1 %BGP_SESSION-5-ADJCHANGE: neighbor 10.1.12.2 IPv4 Unicast topology base removed from session Interface flap",
+        "<37>Sep 5 08:13:05.021 Leaf2 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down",
+        "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
+        "<37>Sep 5 08:13:06.022 Leaf2 %BGP-5-NBR_RESET: Neighbor 10.1.12.1 reset (Interface flap)",
+        "<37>Sep 5 08:13:06.024 Leaf2 %BGP-5-ADJCHANGE: neighbor 10.1.12.1 Down Interface flap",
+        "<37>Sep 5 08:13:06.024 Leaf2 %BGP_SESSION-5-ADJCHANGE: neighbor 10.1.12.1 IPv4 Unicast topology base removed from session Interface flap",
+    ]
+
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [
+            {"source_ip": "127.0.0.1", "raw": raw} for raw in messages
+        ]})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    incident = response.json()[0]
+    assert incident["root_cause_node"] == "Spine1"
+    assert incident["secondary_nodes"] == ["Leaf2"]
+    assert incident["primary_event"] == "%BGP-5-NBR_RESET: Neighbor 10.1.12.2 reset (Interface flap)"
+
+
 def test_ingest_unknown_hosts_returns_empty(client):
     resp = client.post("/ingest", json={"messages": [
         {"source_ip": "1.2.3.4", "raw": "<34>Aug 16 10:00:00 Ghost1 some error"},
@@ -247,15 +277,17 @@ def test_ingest_incident_id_format(client):
 
 
 def test_ingest_uses_immediate_pipeline_to_promote_existing_root_cause(client, app):
+    now = datetime.now(tz=timezone.utc)
     existing = Incident(
         incident_id="INC-OLD-001",
-        created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+        created_at=now,
         root_cause_node="Dist-Switch1",
         primary_event="%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down",
         secondary_nodes=["Access-SW1"],
         raw_log_count=1,
         raw_logs=["%BGP-5-ADJCHANGE: neighbor 10.0.0.1 Down"],
         status="OPEN",
+        last_fault_at=now,
     )
     app.state.store.save(existing)
 
@@ -272,6 +304,32 @@ def test_ingest_uses_immediate_pipeline_to_promote_existing_root_cause(client, a
     assert merged is not None
     assert merged.root_cause_node == "Core-Router1"
     assert "Dist-Switch1" in merged.secondary_nodes
+
+
+def test_ingest_creates_new_incident_when_related_open_incident_is_old(client, app):
+    existing = Incident(
+        incident_id="INC-OLD-001",
+        created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+        root_cause_node="Core-Router1",
+        primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
+        secondary_nodes=["Dist-Switch1"],
+        raw_log_count=1,
+        raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
+        status="OPEN",
+        last_fault_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+    )
+    app.state.store.save(existing)
+
+    response = client.post("/ingest", json={"messages": [{
+        "source_ip": "192.168.1.2",
+        "raw": "<34>Aug 16 10:10:00 Dist-Switch1 %LINK-3-UPDOWN: Interface GE0/1 down",
+    }]})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["incident_id"] != existing.incident_id
+    assert response.json()[0]["root_cause_node"] == "Dist-Switch1"
+    assert app.state.store.count() == 2
 
 
 def test_ingest_uses_immediate_pipeline_for_recovery(client, app):
@@ -343,15 +401,17 @@ def test_ingest_broadcasts_to_websocket(client):
 
 def test_run_batch_merges_later_upstream_root_cause_into_open_incident(poc_engine, tmp_path):
     store = IncidentStore("sqlite:///:memory:")
+    now = datetime.now(tz=timezone.utc)
     store.save(Incident(
         incident_id="INC-OLD-001",
-        created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
+        created_at=now,
         root_cause_node="Dist-Switch1",
         primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
         secondary_nodes=["Access-SW1"],
         raw_log_count=1,
         raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
         status="OPEN",
+        last_fault_at=now,
     ))
 
     log_path = tmp_path / "batch.log"

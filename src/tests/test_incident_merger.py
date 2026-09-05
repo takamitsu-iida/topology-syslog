@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import networkx as nx
 
@@ -88,3 +88,31 @@ def test_unrelated_candidate_stays_new():
 
     assert decision.action == MergeAction.NEW
     assert decision.target is None
+
+
+def test_related_candidate_after_merge_window_stays_new():
+    merger = IncidentMerger(merge_window_sec=120)
+    graph = _engine()
+    target = _incident("Spine1", raw=["first link down"])
+    target.last_fault_at = datetime(2026, 9, 5, 8, 0, tzinfo=timezone.utc)
+    candidate = _incident("Leaf1", raw=["later independent link down"])
+    candidate.last_fault_at = target.last_fault_at + timedelta(seconds=121)
+
+    decision = merger.find_merge_target(candidate, [target], graph)
+
+    assert decision.action == MergeAction.NEW
+    assert decision.target is None
+
+
+def test_related_candidate_within_merge_window_still_appends():
+    merger = IncidentMerger(merge_window_sec=120)
+    graph = _engine()
+    target = _incident("Spine1", raw=["spine down"])
+    target.last_fault_at = datetime(2026, 9, 5, 8, 0, tzinfo=timezone.utc)
+    candidate = _incident("Leaf1", raw=["leaf bgp down"])
+    candidate.last_fault_at = target.last_fault_at + timedelta(seconds=120)
+
+    decision = merger.find_merge_target(candidate, [target], graph)
+
+    assert decision.action == MergeAction.APPEND
+    assert decision.target is target

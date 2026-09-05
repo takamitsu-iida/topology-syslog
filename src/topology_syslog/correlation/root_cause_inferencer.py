@@ -99,6 +99,8 @@ def _find_explicit_silent_root_candidates(
     """BGP peer loss で明示された、無発報の直接隣接 peer を返す。"""
     candidates: dict[str, set[str]] = {}
     for message in active:
+        if "interface flap" in message.message.lower():
+            continue
         match = _BGP_NEIGHBOR_LOST_RE.search(message.message)
         if match is None:
             continue

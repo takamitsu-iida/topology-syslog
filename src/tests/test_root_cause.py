@@ -413,6 +413,33 @@ def test_normal_logging_upstream_prevents_silent_inference():
     assert incidents[0].primary_event != "(inferred \u2014 node did not send SYSLOG)"
 
 
+def test_interface_flap_on_spine_leaf_link_uses_logged_upstream_as_root():
+    """Interface flap は peer の無発報障害ではなく、発報元の物理障害として扱う。"""
+    g = nx.DiGraph()
+    g.add_node("Spine1", role="spine", addresses={"10.1.12.1"})
+    g.add_node("Leaf2", role="leaf", addresses={"10.1.12.2"})
+    g.add_edge("Spine1", "Leaf2", edge_type="physical")
+    engine = GraphEngine(g)
+    msgs = [
+        _msg("Spine1", "%BGP-5-NBR_RESET: Neighbor 10.1.12.2 reset (Interface flap)"),
+        _msg("Spine1", "%BGP-5-ADJCHANGE: neighbor 10.1.12.2 Down Interface flap"),
+        _msg("Spine1", "%BGP_SESSION-5-ADJCHANGE: neighbor 10.1.12.2 IPv4 Unicast topology base removed from session Interface flap"),
+        _msg("Leaf2", "%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down"),
+        _msg("Leaf2", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down"),
+        _msg("Leaf2", "%BGP-5-NBR_RESET: Neighbor 10.1.12.1 reset (Interface flap)"),
+        _msg("Leaf2", "%BGP-5-ADJCHANGE: neighbor 10.1.12.1 Down Interface flap"),
+        _msg("Leaf2", "%BGP_SESSION-5-ADJCHANGE: neighbor 10.1.12.1 IPv4 Unicast topology base removed from session Interface flap"),
+    ]
+
+    incidents = RootCauseInferencer(flapping_threshold=0).infer(msgs, engine)
+
+    assert len(incidents) == 1
+    assert incidents[0].root_cause_node == "Spine1"
+    assert incidents[0].secondary_nodes == ["Leaf2"]
+    assert incidents[0].primary_event == msgs[0].message
+    assert incidents[0].primary_event != "(inferred \u2014 node did not send SYSLOG)"
+
+
 # ---------------------------------------------------------------------------
 # Phase 8-3: フラッピング検出
 # ---------------------------------------------------------------------------

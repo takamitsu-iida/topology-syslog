@@ -145,6 +145,9 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
     open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
     affected_incidents = []
     for inc in incidents:
+        inc = app.state.lifecycle.apply_fault(
+            inc, msg, flap_threshold=app.state.recovery_flap_threshold
+        )
         if app.state.maintenance_checker is not None:
             plan = app.state.maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
             if plan is not None:
@@ -191,7 +194,6 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
             continue
 
         merged = app.state.merger.merge(target, inc, graph)
-        merged = app.state.lifecycle.apply_fault(merged, msg, flap_threshold=app.state.recovery_flap_threshold)
         merged.recurrence_count = inc.recurrence_count
         if await asyncio.to_thread(app.state.store.update, merged):
             event = NotificationEvent.FLAPPING if merged.condition == "FLAPPING" else NotificationEvent.UPDATED

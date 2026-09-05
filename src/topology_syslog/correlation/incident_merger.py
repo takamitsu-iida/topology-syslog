@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import StrEnum
 
 from topology_syslog.models import Incident
@@ -21,21 +22,31 @@ class MergeDecision:
 
 
 class IncidentMerger:
+    def __init__(self, merge_window_sec: float = 120.0) -> None:
+        if merge_window_sec < 0:
+            raise ValueError("merge_window_sec must be non-negative")
+        self._merge_window = timedelta(seconds=merge_window_sec)
+
     def find_merge_target(
         self,
         candidate: Incident,
         open_incidents: list[Incident],
         graph: GraphEngine,
     ) -> MergeDecision:
-        for existing in open_incidents:
+        eligible = [
+            existing for existing in open_incidents
+            if self._within_merge_window(candidate, existing)
+        ]
+
+        for existing in eligible:
             if existing.root_cause_node == candidate.root_cause_node:
                 return MergeDecision(MergeAction.APPEND, existing)
 
-        for existing in open_incidents:
+        for existing in eligible:
             if self._is_descendant(candidate.root_cause_node, existing.root_cause_node, graph):
                 return MergeDecision(MergeAction.APPEND, existing)
 
-        for existing in open_incidents:
+        for existing in eligible:
             if self._is_ancestor(candidate.root_cause_node, existing.root_cause_node, graph):
                 if candidate.root_cause_node in existing.secondary_nodes:
                     return MergeDecision(MergeAction.APPEND, existing)
@@ -80,6 +91,11 @@ class IncidentMerger:
 
     def _is_descendant(self, maybe_descendant: str, node: str, graph: GraphEngine) -> bool:
         return maybe_descendant in graph.get_descendants(node)
+
+    def _within_merge_window(self, candidate: Incident, existing: Incident) -> bool:
+        candidate_at = candidate.last_fault_at or candidate.created_at
+        existing_at = existing.last_fault_at or existing.created_at
+        return abs(candidate_at - existing_at) <= self._merge_window
 
     def _dedupe_secondary(self, root_cause_node: str, nodes: list[str]) -> list[str]:
         return [node for node in dict.fromkeys(nodes) if node != root_cause_node]

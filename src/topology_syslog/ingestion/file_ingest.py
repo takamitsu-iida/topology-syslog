@@ -134,6 +134,7 @@ def _process_message(
     open_incidents = store.list_open_active() if store is not None else []
 
     for inc in incidents:
+        inc.last_fault_at = msg.received_at
         if maintenance_checker is not None:
             plan = maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
             if plan is not None:
