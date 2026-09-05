@@ -93,7 +93,7 @@ def _find_explicit_silent_root_candidates(
     active_nodes: set[str],
     graph: GraphEngine,
 ) -> dict[str, set[str]]:
-    """BGP neighbor down に明示された、無発報の直接上流 peer を返す。"""
+    """BGP neighbor down に明示された、無発報の直接隣接 peer を返す。"""
     candidates: dict[str, set[str]] = {}
     for message in active:
         match = _BGP_NEIGHBOR_DOWN_RE.search(message.message)
@@ -102,7 +102,7 @@ def _find_explicit_silent_root_candidates(
         peer = graph.find_node_by_address(match.group(1))
         if peer is None or peer in active_nodes:
             continue
-        if peer in graph.get_ancestors_filtered(message.hostname, frozenset()):
+        if peer in graph.get_direct_neighbors(message.hostname):
             candidates.setdefault(peer, set()).add(message.hostname)
     return candidates
 

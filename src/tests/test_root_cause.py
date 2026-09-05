@@ -261,6 +261,27 @@ def test_silent_root_cause_inferred_from_single_leaf_named_peer():
     assert incidents[0].primary_event == "(inferred \u2014 node did not send SYSLOG)"
 
 
+def test_silent_leaf_inferred_from_spines_reporting_named_peer_down():
+    """複数 Spine が無発報の直接隣接 Leaf を Down と報告した場合も推論する。"""
+    g = nx.DiGraph()
+    g.add_node("Spine1", role="spine")
+    g.add_node("Spine2", role="spine")
+    g.add_node("Leaf2", role="leaf", addresses={"10.1.12.2", "10.2.12.2"})
+    g.add_edge("Spine1", "Leaf2", edge_type="physical")
+    g.add_edge("Spine2", "Leaf2", edge_type="physical")
+    engine = GraphEngine(g)
+
+    incidents = RootCauseInferencer().infer([
+        _msg("Spine1", "%BGP-5-ADJCHANGE: neighbor 10.1.12.2 Down"),
+        _msg("Spine2", "%BGP-5-ADJCHANGE: neighbor 10.2.12.2 Down"),
+    ], engine)
+
+    assert len(incidents) == 1
+    assert incidents[0].root_cause_node == "Leaf2"
+    assert incidents[0].secondary_nodes == ["Spine1", "Spine2"]
+    assert incidents[0].primary_event == "(inferred \u2014 node did not send SYSLOG)"
+
+
 class _NodeStateReader:
     def __init__(self, state: NodeState) -> None:
         self._state = state

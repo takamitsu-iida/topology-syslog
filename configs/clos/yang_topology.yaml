@@ -55,7 +55,8 @@ network-model:
         role: leaf
         loopback: "10.0.0.11/32"
         node-monitor-enabled: true
-        syslog-min-severity: warning  # 0(emergency)〜4(warning) のみ受け入れる
+        # syslog-min-severity: warning  # 0(emergency)〜4(warning) のみ受け入れる
+        syslog-min-severity: informational  # 0(emergency)〜6(informational) を受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "Uplink to Spine1"
@@ -73,6 +74,7 @@ network-model:
         role: leaf
         loopback: "10.0.0.12/32"
         node-monitor-enabled: true
+        syslog-min-severity: informational  # 0(emergency)〜6(informational) を受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "Uplink to Spine1"
@@ -87,6 +89,7 @@ network-model:
         role: leaf
         loopback: "10.0.0.13/32"
         node-monitor-enabled: true
+        syslog-min-severity: informational  # 0(emergency)〜6(informational) を受け入れる
         interface:
           - interface-id: "GigabitEthernet0/0"
             description: "Uplink to Spine1"
