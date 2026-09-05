@@ -285,8 +285,6 @@ class RootCauseInferencer:
         explicit_silent_roots = _find_explicit_silent_root_candidates(active, active_nodes, graph)
         for src, covered_nodes in sorted(explicit_silent_roots.items()):
             node_state = self._node_state_reader.get(src) if self._node_state_reader else None
-            if node_state is not None and node_state.state == NodeState.UP:
-                continue
             covered = sorted(covered_nodes - assigned)
             if not covered:
                 continue

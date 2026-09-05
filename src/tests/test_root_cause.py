@@ -295,12 +295,12 @@ def test_down_peer_adds_node_monitor_evidence_and_confidence():
     assert any(evidence.source == "node-monitor" for evidence in incident.rca_explanation.primary_candidate.evidences)
 
 
-def test_up_peer_does_not_become_silent_root_cause():
+def test_explicit_bgp_down_peer_becomes_silent_root_cause_even_if_monitor_is_up():
     incidents = RootCauseInferencer(node_state_reader=_NodeStateReader(NodeState.UP)).infer([
         _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor 10.2.11.1 Down"),
     ], _single_leaf_peer_engine())
 
-    assert incidents[0].root_cause_node == "Leaf1"
+    assert incidents[0].root_cause_node == "Spine2"
 
 
 def test_silent_root_cause_coexists_with_independent_incident():
