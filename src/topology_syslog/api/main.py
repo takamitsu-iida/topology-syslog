@@ -346,15 +346,6 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     if projected is None:
         return []
     incident = projected.incident
-    if classification_enforced and classification_result.classification.value not in {"fault-signal", "state-change", "unknown"}:
-        _logger.debug(
-            "Suppressing hypothesis incident for non-fault SYSLOG: signature=%s classification=%s action=%s",
-            msg.normalized_signature,
-            classification_result.classification.value,
-            classification_result.action.value if classification_result.action else None,
-        )
-        return []
-
     if app.state.maintenance_checker is not None:
         app.state.maintenance_checker.reload_if_changed()
         plan = app.state.maintenance_checker.find_active_plan(incident, at=msg.received_at, graph=app.state.graph)

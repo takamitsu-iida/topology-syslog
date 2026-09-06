@@ -15,6 +15,33 @@ function confidenceLabel(value: number | null) {
   return { text: `Low ${Math.round(value * 100)}%`, cls: 'bg-gray-100 text-gray-600' }
 }
 
+function scoreEvidenceLabel(evidence: { source: string; summary: string }) {
+  if (evidence.source !== 'hypothesis-score') return { title: evidence.source, summary: evidence.summary }
+
+  const [component, ...detailParts] = evidence.summary.split(': ')
+  const detail = detailParts.join(': ')
+  const labels: Record<string, { title: string; summary: string }> = {
+    coverage: { title: '観測カバー率', summary: detail.replace(/explains (\d+) of (\d+) observation\(s\)/, '$2 件中 $1 件の観測を説明') },
+    specificity: { title: '原因候補の具体性', summary: '装置全体より、インターフェースやリンクなど具体的な候補を優先します' },
+    direct_evidence: { title: '直接証拠', summary: detail.replace(/(\d+) confidence-weighted directly observed hit\(s\)/, '候補自身を直接観測した証拠: $1 件') },
+    evidence_strength: { title: '観測の信頼度', summary: detail.replace(/average observation confidence ([\d.]+)/, '観測信頼度の平均: $1') },
+    silent_peer: { title: 'サイレント障害の証拠', summary: '複数の装置が同じ相手装置の停止を報告した場合に加点します' },
+    temporal_fit: { title: '時系列の整合性', summary: '原因に近い観測が、影響を示す観測より後にならない場合に加点します' },
+    contradiction: { title: '矛盾する証拠', summary: '復旧を示す観測がある場合に減点します' },
+    redundancy: { title: '冗長性の影響', summary: '冗長経路が一部残っている場合、広い範囲の装置障害候補を減点します' },
+    link_coherence: { title: '物理リンクの整合性', summary: detail === 'not applicable' ? 'この候補には適用されません' : '同一物理リンクで複数の観測を説明できるため加点します' },
+    topology_distance: { title: 'トポロジー距離', summary: detail.replace(/average topology distance ([\d.]+)/, '原因候補から観測対象までの平均距離: $1') },
+  }
+  return labels[component] ?? { title: component, summary: detail }
+}
+
+function scoreEvidenceValue(evidence: { source: string; summary: string; weight: number }) {
+  if (evidence.source === 'hypothesis-score' && evidence.summary.startsWith('coverage:')) {
+    return `${Math.round(evidence.weight)} 点（カバー率 ${Math.round(evidence.weight)}%）`
+  }
+  return `${evidence.weight >= 0 ? '+' : ''}${evidence.weight.toFixed(evidence.weight % 1 === 0 ? 0 : 1)} 点`
+}
+
 export function IncidentDetail() {
   const { id } = useParams<{ id: string }>()
 
@@ -188,10 +215,10 @@ export function IncidentDetail() {
                   {primaryRca.evidences.map((evidence, index) => (
                     <li key={`${evidence.source}-${index}`} className="rounded border p-3 text-sm text-gray-700">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{evidence.source}</span>
-                        <span className="text-xs text-gray-400">+{Math.round(evidence.weight * 100)}%</span>
+                        <span className="font-medium">{scoreEvidenceLabel(evidence).title}</span>
+                        <span className="text-xs text-gray-400">{scoreEvidenceValue(evidence)}</span>
                       </div>
-                      <p className="mt-1 text-xs text-gray-600">{evidence.summary}</p>
+                      <p className="mt-1 text-xs text-gray-600">{scoreEvidenceLabel(evidence).summary}</p>
                       {evidence.related_nodes.length > 0 && (
                         <p className="mt-1 text-xs text-gray-400">関連ノード: {evidence.related_nodes.join(', ')}</p>
                       )}

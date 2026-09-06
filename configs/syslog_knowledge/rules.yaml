@@ -58,6 +58,22 @@ rules:
     confidence: 0.95
     priority: 100
 
+  - id: cisco-bgp-neighbor-reset
+    description: "BGP ネイバーのリセット通知。リンク復旧時にも出力されるため、保存のみとし推論には使わない。"
+    vendor: cisco-ios
+    signature: "%BGP-*-NBR_RESET"
+    classification: retain-only
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip bgp summary"
+      - "show logging | include BGP"
+    status: approved
+    confidence: 0.8
+    priority: 100
+
   - id: cisco-ospf-adjch
     description: "OSPF ネイバーの隣接状態変化。リンク断や対向ルーター障害との相関を確認する。"
     vendor: cisco-ios

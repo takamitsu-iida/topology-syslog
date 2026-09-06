@@ -244,6 +244,24 @@ def test_ingest_interface_flap_uses_spine1_as_logged_root_cause():
     assert incident["primary_event"] == "%BGP-5-NBR_RESET: Neighbor 10.1.12.2 reset (Interface flap)"
 
 
+def test_ingest_bgp_neighbor_reset_does_not_create_standalone_incident():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+    )
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [{
+            "source_ip": "127.0.0.1",
+            "raw": "<37>Sep 6 04:55:16.094 Spine2 %BGP-5-NBR_RESET: Neighbor 10.2.12.2 active reset (BGP Notification sent)",
+        }]})
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert app.state.store.count() == 0
+
+
 def test_ingest_unknown_hosts_returns_empty(client):
     resp = client.post("/ingest", json={"messages": [
         {"source_ip": "1.2.3.4", "raw": "<34>Aug 16 10:00:00 Ghost1 some error"},
