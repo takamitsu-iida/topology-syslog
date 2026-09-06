@@ -105,7 +105,7 @@ export function IncidentCard({ incident, onResolve }: Props) {
         {childCount > 0 && <span>子インシデント: {childCount}</span>}
         <span>ログ数: {incident.raw_log_count}</span>
         <span>{confidenceLabel(incident.rca_explanation.confidence)}</span>
-        <span>発生時刻: {new Date(incident.created_at).toLocaleString('ja-JP', { hour12: false })}</span>
+        <span>受信時刻: {new Date(incident.created_at).toLocaleString('ja-JP', { hour12: false })}</span>
       </div>
 
       {isOpen && onResolve && (
