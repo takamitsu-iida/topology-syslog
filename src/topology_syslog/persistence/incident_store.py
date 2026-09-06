@@ -37,6 +37,7 @@ class _IncidentRow(_Base):
     last_recovery_at     = Column(DateTime, nullable=True)
     flap_count           = Column(Integer,  nullable=False, server_default="0")
     recovery_evidence    = Column(JSON,     nullable=False, server_default="[]")
+    flap_history         = Column(JSON,     nullable=False, server_default="[]")
     rca_explanation      = Column(JSON,     nullable=False, server_default="{}")
 
 
@@ -76,6 +77,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         last_recovery_at=inc.last_recovery_at.replace(tzinfo=None) if inc.last_recovery_at else None,
         flap_count=inc.flap_count,
         recovery_evidence=inc.recovery_evidence,
+        flap_history=inc.flap_history,
         rca_explanation=_rca_to_json(inc.rca_explanation),
     )
 
@@ -97,6 +99,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         last_recovery_at=row.last_recovery_at.replace(tzinfo=timezone.utc) if row.last_recovery_at else None,
         flap_count=int(row.flap_count or 0),
         recovery_evidence=list(row.recovery_evidence or []),
+        flap_history=list(row.flap_history or []),
         rca_explanation=_rca_from_json(dict(row.rca_explanation or {})),
     )
 
@@ -119,6 +122,7 @@ class IncidentStore:
                 "ALTER TABLE incidents ADD COLUMN last_recovery_at TIMESTAMP",
                 "ALTER TABLE incidents ADD COLUMN flap_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE incidents ADD COLUMN recovery_evidence JSON DEFAULT '[]'",
+                "ALTER TABLE incidents ADD COLUMN flap_history JSON DEFAULT '[]'",
                 "ALTER TABLE incidents ADD COLUMN rca_explanation JSON DEFAULT '{}'",
             ]:
                 try:
@@ -152,6 +156,7 @@ class IncidentStore:
             row.last_recovery_at = incident.last_recovery_at.replace(tzinfo=None) if incident.last_recovery_at else None
             row.flap_count = incident.flap_count
             row.recovery_evidence = incident.recovery_evidence
+            row.flap_history = incident.flap_history
             row.rca_explanation = _rca_to_json(incident.rca_explanation)
             session.commit()
             return True

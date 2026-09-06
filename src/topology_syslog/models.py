@@ -153,4 +153,5 @@ class Incident:
     last_recovery_at: datetime | None = None
     flap_count: int = 0
     recovery_evidence: list[str] = field(default_factory=list)
+    flap_history: list[dict[str, object]] = field(default_factory=list)
     rca_explanation: RCAExplanation = field(default_factory=RCAExplanation)

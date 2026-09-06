@@ -47,14 +47,17 @@ class HypothesisIncidentLifecycle:
         if incident.status != "OPEN" or observation.assertion != "recovery":
             return HypothesisLifecycleEvent(HypothesisLifecycleEventType.NO_MATCH)
         root_object = _root_cause_object(incident)
-        if root_object is None or not self._is_related_recovery(root_object, observation.observed_object):
+        if root_object is None or not self.is_related(root_object, observation.observed_object):
             return HypothesisLifecycleEvent(HypothesisLifecycleEventType.NO_MATCH)
 
         incident.last_recovery_at = observation.observed_at
         if observation.raw_message not in incident.recovery_evidence:
             incident.recovery_evidence.append(observation.raw_message)
+        _append_flap_history(incident, observation, state="up")
 
-        if observation.observed_object == root_object or self._topology.object_type(root_object) in {"physical-link", "device"}:
+        if incident.condition == IncidentCondition.FLAPPING.value:
+            event_type = HypothesisLifecycleEventType.FLAPPING
+        elif observation.observed_object == root_object or self._topology.object_type(root_object) in {"physical-link", "device"}:
             incident.condition = IncidentCondition.RECOVERING.value
             event_type = HypothesisLifecycleEventType.RECOVERING
         else:
@@ -71,10 +74,11 @@ class HypothesisIncidentLifecycle:
         if incident.status != "OPEN" or observation.assertion != "fault":
             return HypothesisLifecycleEvent(HypothesisLifecycleEventType.NO_MATCH)
         root_object = _root_cause_object(incident)
-        if root_object is not None and not self._is_related_recovery(root_object, observation.observed_object):
+        if root_object is not None and not self.is_related(root_object, observation.observed_object):
             return HypothesisLifecycleEvent(HypothesisLifecycleEventType.NO_MATCH)
 
         incident.last_fault_at = observation.observed_at
+        transitioned_to_down = _append_flap_history(incident, observation, state="down")
         if incident.condition in {IncidentCondition.RECOVERING.value, IncidentCondition.RECOVERED.value}:
             incident.flap_count += 1
             if incident.flap_count >= self._flap_threshold:
@@ -84,7 +88,8 @@ class HypothesisIncidentLifecycle:
                 incident.condition = IncidentCondition.ACTIVE.value
                 event_type = HypothesisLifecycleEventType.FAULT_APPLIED
         elif incident.condition == IncidentCondition.FLAPPING.value:
-            incident.flap_count += 1
+            if transitioned_to_down:
+                incident.flap_count += 1
             event_type = HypothesisLifecycleEventType.FLAPPING
         else:
             incident.condition = IncidentCondition.ACTIVE.value
@@ -110,7 +115,7 @@ class HypothesisIncidentLifecycle:
             matched_root_cause_object=_root_cause_object(incident),
         )
 
-    def _is_related_recovery(self, root_object: str, observed_object: str) -> bool:
+    def is_related(self, root_object: str, observed_object: str) -> bool:
         if observed_object == root_object:
             return True
         if root_object not in self._topology.graph or observed_object not in self._topology.graph:
@@ -119,7 +124,20 @@ class HypothesisIncidentLifecycle:
             return True
         if self._topology.graph.has_edge(observed_object, root_object):
             return True
+        if self._common_physical_link(root_object, observed_object) is not None:
+            return True
         return observed_object in self._topology.graph.successors(root_object)
+
+    def _common_physical_link(self, object_a: str, object_b: str) -> str | None:
+        links_a = {
+            successor for successor in self._topology.graph.successors(object_a)
+            if self._topology.object_type(successor) == "physical-link"
+        }
+        links_b = {
+            successor for successor in self._topology.graph.successors(object_b)
+            if self._topology.object_type(successor) == "physical-link"
+        }
+        return next(iter(links_a & links_b), None)
 
 
 def _root_cause_object(incident: Incident) -> str | None:
@@ -131,3 +149,16 @@ def _root_cause_object(incident: Incident) -> str | None:
             if ":" in related_log_id:
                 return related_log_id
     return None
+
+
+def _append_flap_history(incident: Incident, observation: Observation, *, state: str) -> bool:
+    if incident.flap_history and incident.flap_history[-1].get("state") == state:
+        return False
+    incident.flap_history.append({
+        "observed_at": observation.observed_at.isoformat(),
+        "state": state,
+        "observed_object": observation.observed_object,
+        "source_node": observation.source_node,
+        "message": observation.raw_message,
+    })
+    return True

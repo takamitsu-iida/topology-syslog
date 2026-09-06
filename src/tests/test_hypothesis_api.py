@@ -139,6 +139,39 @@ def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_r
     }
 
 
+def test_hypothesis_ingest_keeps_repeated_leaf2_spine2_flap_in_one_incident():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        rca_engine="hypothesis",
+        syslog_port=0,
+        recovery_flap_threshold=1,
+    )
+
+    with TestClient(app) as client:
+        for state, second in [("down", "06.021"), ("up", "07.021"), ("down", "08.021"), ("up", "09.021")]:
+            response = client.post("/ingest", json={"messages": [
+                {
+                    "source_ip": "127.0.0.1",
+                    "raw": f"<35>Sep 5 08:13:{second} Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to {state}",
+                },
+                {
+                    "source_ip": "127.0.0.1",
+                    "raw": f"<35>Sep 5 08:13:{second} Spine2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to {state}",
+                },
+            ]})
+            assert response.status_code == 200
+
+        incidents = client.get("/incidents").json()["incidents"]
+
+    assert len(incidents) == 1
+    incident = incidents[0]
+    assert incident["condition"] == "FLAPPING"
+    assert incident["flap_count"] == 1
+    assert [entry["state"] for entry in incident["flap_history"]] == ["down", "up", "down", "up"]
+
+
 def test_migration_readiness_api_evaluates_labeled_samples_without_saving():
     app = create_app(
         database_url="sqlite:///:memory:",

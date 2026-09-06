@@ -93,6 +93,36 @@ def _incident_root_cause_object(incident) -> str | None:
     return None
 
 
+def _find_matching_hypothesis_incident(open_incidents, root_object: str, lifecycle: HypothesisIncidentLifecycle):
+    for existing in open_incidents:
+        existing_root = _incident_root_cause_object(existing)
+        if existing_root == root_object:
+            return existing
+    for existing in open_incidents:
+        existing_root = _incident_root_cause_object(existing)
+        if existing_root is not None and lifecycle.is_related(existing_root, root_object):
+            return existing
+    return None
+
+
+def _merge_projected_hypothesis_incident(existing, projected, observation, lifecycle: HypothesisIncidentLifecycle):
+    projected.incident_id = existing.incident_id
+    projected.created_at = existing.created_at
+    projected.recurrence_count = existing.recurrence_count
+    projected.raw_logs = [*existing.raw_logs, *projected.raw_logs]
+    projected.raw_log_count = existing.raw_log_count + projected.raw_log_count
+    projected.secondary_nodes = list(dict.fromkeys([*existing.secondary_nodes, *projected.secondary_nodes]))
+    projected.recovery_evidence = existing.recovery_evidence
+    projected.flap_count = existing.flap_count
+    projected.flap_history = existing.flap_history
+    projected.condition = existing.condition
+    projected.status = existing.status
+    projected.last_recovery_at = existing.last_recovery_at
+    projected.last_fault_at = existing.last_fault_at
+    event = lifecycle.apply_fault(projected, observation)
+    return event.incident if event.incident is not None else projected
+
+
 def _compare_rca_engines(app: FastAPI, messages: list) -> dict:
     graph = getattr(app.state, "graph", None)
     hypothesis_engine = getattr(app.state, "hypothesis_engine", None)
@@ -377,13 +407,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     if should_update_active:
         existing = await asyncio.to_thread(app.state.store.get_by_id, active_id)
         if existing is not None:
-            incident.incident_id = existing.incident_id
-            incident.created_at = existing.created_at
-            incident.recurrence_count = existing.recurrence_count
-            incident.recovery_evidence = existing.recovery_evidence
-            incident.flap_count = existing.flap_count
-            incident.condition = existing.condition
-            incident.status = existing.status
+            incident = _merge_projected_hypothesis_incident(existing, incident, observation, lifecycle)
             if await asyncio.to_thread(app.state.store.update, incident):
                 await asyncio.to_thread(
                     app.state.store.record_rca_evaluation,
@@ -393,34 +417,26 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
                     evaluated_at=msg.received_at,
                 )
                 app.state.hypothesis_active_root_object = update.current_root_cause_object
-                await _notify_lifecycle(app, incident, NotificationEvent.UPDATED)
+                event = NotificationEvent.FLAPPING if incident.condition == "FLAPPING" else NotificationEvent.UPDATED
+                await _notify_lifecycle(app, incident, event)
                 await app.state.ws_manager.broadcast({
                     "type": "incident.updated",
                     "incident": IncidentOut.model_validate(incident).model_dump(mode="json"),
                 })
                 return [incident]
 
-    matching_open = next(
-        (
-            existing for existing in await asyncio.to_thread(app.state.store.list_open_lifecycle)
-            if _incident_root_cause_object(existing) == update.current_root_cause_object
-        ),
-        None,
+    matching_open = _find_matching_hypothesis_incident(
+        await asyncio.to_thread(app.state.store.list_open_lifecycle),
+        update.current_root_cause_object,
+        lifecycle,
     )
     if matching_open is not None:
-        incident.incident_id = matching_open.incident_id
-        incident.created_at = matching_open.created_at
-        incident.raw_logs = [*matching_open.raw_logs, *incident.raw_logs]
-        incident.raw_log_count = matching_open.raw_log_count + incident.raw_log_count
-        incident.secondary_nodes = list(dict.fromkeys([*matching_open.secondary_nodes, *incident.secondary_nodes]))
-        incident.recovery_evidence = matching_open.recovery_evidence
-        incident.flap_count = matching_open.flap_count
-        incident.condition = matching_open.condition
-        incident.status = matching_open.status
+        incident = _merge_projected_hypothesis_incident(matching_open, incident, observation, lifecycle)
         if await asyncio.to_thread(app.state.store.update, incident):
             app.state.hypothesis_active_incident_id = incident.incident_id
             app.state.hypothesis_active_root_object = update.current_root_cause_object
-            await _notify_lifecycle(app, incident, NotificationEvent.UPDATED)
+            event = NotificationEvent.FLAPPING if incident.condition == "FLAPPING" else NotificationEvent.UPDATED
+            await _notify_lifecycle(app, incident, event)
             await app.state.ws_manager.broadcast({
                 "type": "incident.updated",
                 "incident": IncidentOut.model_validate(incident).model_dump(mode="json"),
@@ -428,6 +444,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
             return [incident]
 
     incident.recurrence_count = await asyncio.to_thread(app.state.store.count_by_root_cause, incident.root_cause_node)
+    lifecycle.apply_fault(incident, observation)
     await asyncio.to_thread(app.state.store.save, incident)
     app.state.hypothesis_active_incident_id = incident.incident_id
     app.state.hypothesis_active_root_object = update.current_root_cause_object

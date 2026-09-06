@@ -62,6 +62,7 @@ class IncidentOut(BaseModel):
     last_recovery_at: datetime | None = None
     flap_count: int = 0
     recovery_evidence: list[str] = []
+    flap_history: list[dict[str, object]] = []
     rca_explanation: RCAExplanationOut
 
 
