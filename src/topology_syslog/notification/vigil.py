@@ -50,17 +50,11 @@ class VigilNotifier(BaseNotifier):
         if incident.condition:
             description += f" / 状態: {incident.condition}"
 
-        # FLAPPING または再発インシデントは P2 に昇格
-        priority = (
-            "P2"
-            if incident.condition == "FLAPPING" or incident.recurrence_count > 0
-            else self._default_priority
-        )
+        priority = "P2" if incident.recurrence_count > 0 else self._default_priority
         title_prefix = {
             NotificationEvent.NEW: "NEW",
             NotificationEvent.UPDATED: "UPDATED",
             NotificationEvent.RECOVERING: "RECOVERING",
-            NotificationEvent.FLAPPING: "FLAPPING",
         }.get(event, "UPDATED")
 
         httpx.post(

@@ -113,11 +113,7 @@ async def _apply_state_event(
     if state in {"DOWN", "DEGRADED"} and incident.condition == "ACTIVE":
         incident.condition = "DEGRADED"
     elif state == "DOWN" and incident.condition in {"RECOVERED", "RECOVERING"}:
-        incident.flap_count += 1
-        if incident.flap_count >= request.app.state.recovery_flap_threshold:
-            incident.condition = "FLAPPING"
-        else:
-            incident.condition = "DEGRADED"
+        incident.condition = "DEGRADED"
     elif state == "UP" and incident.condition == "DEGRADED":
         incident.condition = "RECOVERING"
         incident.last_recovery_at = observed_at
@@ -237,7 +233,7 @@ def _create_node_state_incident(
         created_at=observed_at,
         root_cause_node=node_id,
         primary_event=summary,
-        condition="ACTIVE",
+        condition="DEGRADED",
         last_fault_at=observed_at,
         rca_explanation=RCAExplanation(
             confidence=0.0,

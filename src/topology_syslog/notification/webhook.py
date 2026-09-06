@@ -36,7 +36,6 @@ class WebhookNotifier(BaseNotifier):
             "condition":                incident.condition,
             "last_fault_at":            incident.last_fault_at.isoformat() if incident.last_fault_at else None,
             "last_recovery_at":         incident.last_recovery_at.isoformat() if incident.last_recovery_at else None,
-            "flap_count":               incident.flap_count,
             "recovery_evidence":        incident.recovery_evidence,
         }
         httpx.post(

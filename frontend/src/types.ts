@@ -9,12 +9,11 @@ export interface Incident {
   secondary_nodes: string[]
   raw_log_count: number
   raw_logs: string[]
-  status: 'OPEN' | 'CLOSED' | 'RESOLVED' | 'FLAPPING'
-  condition: 'ACTIVE' | 'DEGRADED' | 'RECOVERING' | 'RECOVERED' | 'FLAPPING'
+  status: 'OPEN' | 'CLOSED' | 'RESOLVED'
+  condition: 'ACTIVE' | 'DEGRADED' | 'RECOVERING' | 'RECOVERED'
   recurrence_count: number
   last_fault_at: string | null
   last_recovery_at: string | null
-  flap_count: number
   recovery_evidence: string[]
   rca_explanation: RCAExplanation
   parent_incident_id: string | null
@@ -86,7 +85,7 @@ export interface SimilarIncident {
   root_cause_node: string
   created_at: string
   primary_event: string
-  status: 'OPEN' | 'RESOLVED' | 'FLAPPING'
+  status: 'OPEN' | 'RESOLVED'
 }
 
 export interface SimilarIncidentsResponse {

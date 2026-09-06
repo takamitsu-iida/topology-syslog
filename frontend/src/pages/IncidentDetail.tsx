@@ -107,7 +107,6 @@ export function IncidentDetail() {
     if (incident.condition === 'RECOVERED') return { label: '復旧済', cls: 'bg-emerald-100 text-emerald-700' }
     if (incident.condition === 'RECOVERING') return { label: '復旧確認中', cls: 'bg-sky-100 text-sky-700' }
     if (incident.condition === 'DEGRADED') return { label: '部分復旧', cls: 'bg-yellow-100 text-yellow-700' }
-    if (incident.condition === 'FLAPPING') return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
     if (incident.status === 'CLOSED' || incident.status === 'RESOLVED') return { label: 'クローズ済', cls: 'bg-gray-200 text-gray-600' }
     if (incident.recurrence_count > 0)  return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
     return { label: '新規発生', cls: 'bg-red-100 text-red-700' }
@@ -171,10 +170,6 @@ export function IncidentDetail() {
         <div className="rounded-lg border bg-white p-3 shadow-sm">
           <p className="text-xs text-gray-400">現在状態</p>
           <p className="mt-0.5 font-semibold text-gray-800">{incident.condition}</p>
-        </div>
-        <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs text-gray-400">フラップ回数</p>
-          <p className="mt-0.5 font-semibold text-gray-800">{incident.flap_count}</p>
         </div>
         <div className="col-span-2 rounded-lg border bg-white p-3 shadow-sm">
           <p className="text-xs text-gray-400">主イベント</p>
@@ -531,8 +526,6 @@ export function IncidentDetail() {
                       className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
                         s.status === 'OPEN'
                           ? 'bg-red-100 text-red-700'
-                          : s.status === 'FLAPPING'
-                          ? 'bg-orange-100 text-orange-700'
                           : 'bg-gray-200 text-gray-600'
                       }`}
                     >

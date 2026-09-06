@@ -26,25 +26,12 @@ class IncidentLifecycle:
         return incident
 
     def apply_fault(self, incident: Incident, message: SyslogMessage, flap_threshold: int = 2) -> Incident:
+        del flap_threshold
         if incident.status != "OPEN":
             return incident
 
         incident.last_fault_at = message.received_at
-        if incident.condition in {IncidentCondition.RECOVERING.value, IncidentCondition.RECOVERED.value}:
-            incident.flap_count += 1
-            if incident.flap_count >= flap_threshold:
-                incident.condition = IncidentCondition.FLAPPING.value
-            else:
-                incident.condition = IncidentCondition.ACTIVE.value
-        elif incident.condition == IncidentCondition.FLAPPING.value:
-            incident.flap_count += 1
-        else:
-            if incident.flap_count > 0:
-                incident.flap_count += 1
-                if incident.flap_count >= flap_threshold:
-                    incident.condition = IncidentCondition.FLAPPING.value
-                    return incident
-            incident.condition = IncidentCondition.ACTIVE.value
+        incident.condition = IncidentCondition.ACTIVE.value
         return incident
 
     def mark_recovered(self, incident: Incident, at: datetime) -> Incident:

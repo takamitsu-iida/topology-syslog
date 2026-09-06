@@ -30,7 +30,6 @@ def _build_payload(incident: Incident, event: NotificationEvent = NotificationEv
         NotificationEvent.UPDATED: "インシデント更新",
         NotificationEvent.RECOVERING: "復旧確認中",
         NotificationEvent.RECOVERED: "復旧検知",
-        NotificationEvent.FLAPPING: "フラッピング検知",
     }.get(event, "インシデント更新")
     return {
         "blocks": [

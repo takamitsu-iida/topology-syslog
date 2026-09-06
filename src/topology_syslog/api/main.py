@@ -394,7 +394,7 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
         merged = app.state.merger.merge(target, inc, graph)
         merged.recurrence_count = inc.recurrence_count
         if await asyncio.to_thread(app.state.store.update, merged):
-            event = NotificationEvent.FLAPPING if merged.condition == "FLAPPING" else NotificationEvent.UPDATED
+            event = NotificationEvent.UPDATED
             await _notify_lifecycle(app, merged, event)
             await app.state.ws_manager.broadcast({
                 "type": "incident.updated",
@@ -497,7 +497,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
                     evaluated_at=msg.received_at,
                 )
                 app.state.hypothesis_active_root_object = update.current_root_cause_object
-                event = NotificationEvent.FLAPPING if incident.condition == "FLAPPING" else NotificationEvent.UPDATED
+                event = NotificationEvent.UPDATED
                 await _notify_lifecycle(app, incident, event)
                 await app.state.ws_manager.broadcast({
                     "type": "incident.updated",
@@ -516,7 +516,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
             await _persist_impact_children(app, incident, projected.incident)
             app.state.hypothesis_active_incident_id = incident.incident_id
             app.state.hypothesis_active_root_object = update.current_root_cause_object
-            event = NotificationEvent.FLAPPING if incident.condition == "FLAPPING" else NotificationEvent.UPDATED
+            event = NotificationEvent.UPDATED
             await _notify_lifecycle(app, incident, event)
             await app.state.ws_manager.broadcast({
                 "type": "incident.updated",

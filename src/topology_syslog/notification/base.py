@@ -12,7 +12,6 @@ class NotificationEvent(StrEnum):
     UPDATED = "incident.updated"
     RECOVERING = "incident.recovering"
     RECOVERED = "incident.recovered"
-    FLAPPING = "incident.flapping"
 
 
 class BaseNotifier(ABC):

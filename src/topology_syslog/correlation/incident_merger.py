@@ -85,8 +85,6 @@ class IncidentMerger:
 
         target.raw_logs = [*target.raw_logs, *candidate.raw_logs]
         target.raw_log_count += candidate.raw_log_count
-        if candidate.condition == "FLAPPING" or target.condition == "FLAPPING":
-            target.condition = "FLAPPING"
         target.maintenance_plan_id = target.maintenance_plan_id or candidate.maintenance_plan_id
         return target
 

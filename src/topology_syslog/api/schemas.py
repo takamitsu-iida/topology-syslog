@@ -62,9 +62,7 @@ class IncidentOut(BaseModel):
     maintenance_plan_id: str | None = None
     last_fault_at: datetime | None = None
     last_recovery_at: datetime | None = None
-    flap_count: int = 0
     recovery_evidence: list[str] = []
-    flap_history: list[dict[str, object]] = []
     rca_explanation: RCAExplanationOut
     parent_incident_id: str | None = None
     child_incident_ids: list[str] = []

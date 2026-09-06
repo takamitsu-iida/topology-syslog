@@ -27,8 +27,6 @@ function getConditionBadge(incident: Incident): ConditionBadge {
     return { label: '復旧確認中', cls: 'bg-sky-100 text-sky-700' }
   if (incident.condition === 'DEGRADED')
     return { label: '部分復旧', cls: 'bg-yellow-100 text-yellow-700' }
-  if (incident.condition === 'FLAPPING')
-    return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
   if (incident.recurrence_count > 0)
     return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
   return { label: '障害継続中', cls: 'bg-red-100 text-red-700' }
@@ -47,7 +45,6 @@ export function IncidentCard({ incident, onResolve }: Props) {
     OPEN:     incident.recurrence_count > 0
                 ? 'border-orange-300 bg-orange-50'
                 : 'border-red-300 bg-red-50',
-    FLAPPING: 'border-amber-300 bg-amber-50',
     RESOLVED: 'border-gray-200 bg-gray-50',
     CLOSED: 'border-gray-200 bg-gray-50',
   }[incident.status] ?? 'border-gray-200 bg-gray-50'

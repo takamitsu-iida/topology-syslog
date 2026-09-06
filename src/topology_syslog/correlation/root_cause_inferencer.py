@@ -23,16 +23,10 @@ _ROUTING_PREFIXES: frozenset[str] = frozenset([
 ])
 
 # Cisco IOS %FAC-SEV-MNEM 抽出
-_CISCO_EVENT_RE = re.compile(r'%[A-Z0-9_]+-\d+-[A-Z0-9_]+')
 _BGP_NEIGHBOR_LOST_RE = re.compile(
     r'\b(?:sent\s+to\s+neighbor|neighbor)\s+(\S+)(?:\s+\S+){0,6}?\s+(?:down\b|reset\b|\(?hold\s+time\s+expired\)?|topology\s+\S+\s+removed\s+from\s+session\b)',
     re.IGNORECASE,
 )
-
-
-def _extract_event_type(message: str) -> str | None:
-    m = _CISCO_EVENT_RE.search(message)
-    return m.group(0) if m else None
 
 
 def _is_routing_event(message: str) -> bool:
@@ -41,29 +35,6 @@ def _is_routing_event(message: str) -> bool:
 
 # サイレント根本原因のプレースホルダーイベント
 _SILENT_EVENT = "(inferred — node did not send SYSLOG)"
-
-
-def _detect_flapping(
-    active: list[SyslogMessage],
-    active_nodes: set[str],
-    threshold: int,
-) -> dict[str, tuple[str, int]]:
-    """同一ノード × 同一 %FAC-SEV-MNEM が threshold 回以上のノードを返す。
-
-    返値: {node: (event_type, count)}  ← カウント最大のイベント種別を代表値として採用。
-    """
-    counts: Counter = Counter(
-        (m.hostname, et)
-        for m in active
-        if m.hostname in active_nodes
-        for et in (_extract_event_type(m.message),)
-        if et is not None
-    )
-    flapping: dict[str, tuple[str, int]] = {}
-    for (node, et), cnt in counts.items():
-        if cnt >= threshold and (node not in flapping or cnt > flapping[node][1]):
-            flapping[node] = (et, cnt)
-    return flapping
 
 
 def _find_silent_root_candidates(
@@ -141,7 +112,6 @@ def _build_rca_explanation(
     bgp_nodes: frozenset[str],
     *,
     silent: bool = False,
-    flapping: bool = False,
     node_state: NodeStateRecord | None = None,
 ) -> RCAExplanation:
     evidences: list[RCAEvidence] = []
@@ -155,14 +125,6 @@ def _build_rca_explanation(
             weight=0.0,
             related_nodes=related_nodes,
             related_log_ids=[str(idx) for idx, msg in enumerate(messages) if msg.hostname in secondary_nodes],
-        ))
-    elif flapping:
-        evidences.append(RCAEvidence(
-            source="syslog",
-            summary=f"{root_cause_node} emitted repeated matching events",
-            weight=0.0,
-            related_nodes=[root_cause_node],
-            related_log_ids=root_log_ids,
         ))
     else:
         evidences.append(RCAEvidence(
@@ -308,33 +270,6 @@ class RootCauseInferencer:
                 ),
             ))
             assigned.update(related)
-
-        # フラッピング検出: 正規推論の前に処理して assigned に追加
-        if self._flapping_threshold > 0:
-            for node, (event_type, count) in sorted(
-                _detect_flapping(active, active_nodes, self._flapping_threshold).items()
-            ):
-                node_msgs = [m for m in messages if m.hostname == node]
-                incidents.append(Incident(
-                    incident_id=self._new_id(date_str),
-                    created_at=now,
-                    root_cause_node=node,
-                    primary_event=f"FLAPPING: {event_type} repeated {count}x in window",
-                    secondary_nodes=[],
-                    raw_log_count=len(node_msgs),
-                    raw_logs=[m.message for m in node_msgs],
-                    status="OPEN",
-                    condition="FLAPPING",
-                    rca_explanation=_build_rca_explanation(
-                        node,
-                        [],
-                        node_msgs,
-                        graph,
-                        bgp_nodes,
-                        flapping=True,
-                    ),
-                ))
-                assigned.add(node)
 
         # サイレント根本原因: ログを送れなかった上流ノードを正規処理の前に検出・集約
         explicit_silent_roots = _find_explicit_silent_root_candidates(active, active_nodes, graph)

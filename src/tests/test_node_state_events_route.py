@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import create_app
@@ -224,7 +226,46 @@ def test_down_after_recovery_creates_new_incident(tmp_path):
     assert updated.condition == "RECOVERED"
     new_incident = app.state.store.get_by_id("INC-20260906-001")
     assert new_incident is not None
-    assert new_incident.condition == "ACTIVE"
+    assert new_incident.condition == "DEGRADED"
+
+
+def test_node_down_up_down_creates_new_incident_after_recovery(tmp_path):
+    from datetime import datetime, timezone
+    from topology_syslog.models import Incident
+
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'node-lifecycle.db'}",
+        syslog_port=0,
+        node_monitor_event_token="event-token",
+        recovery_quiet_period_sec=0.01,
+    )
+    headers = {"Authorization": "Bearer event-token"}
+    with TestClient(app) as client:
+        first_down = client.post(
+            "/internal/node-state-events",
+            json={"event_id": "node-down-1", "event_type": "node_state.changed", "node_id": "Spine2", "state": "DOWN"},
+            headers=headers,
+        )
+        first_id = first_down.json()["related_incident_ids"][0]
+        client.post(
+            "/internal/node-state-events",
+            json={"event_id": "node-up-1", "event_type": "node_state.changed", "node_id": "Spine2", "state": "UP"},
+            headers=headers,
+        )
+        time.sleep(0.05)
+        recovered = app.state.store.get_by_id(first_id)
+        second_down = client.post(
+            "/internal/node-state-events",
+            json={"event_id": "node-down-2", "event_type": "node_state.changed", "node_id": "Spine2", "state": "DOWN"},
+            headers=headers,
+        )
+
+    assert first_down.status_code == 200
+    assert second_down.status_code == 200
+    assert recovered is not None
+    assert recovered.condition == "RECOVERED"
+    assert second_down.json()["related_incident_ids"][0] != first_id
+    assert app.state.store.count() == 2
 
 
 def test_repeated_down_up_cycles_create_new_incident_after_recovery(tmp_path):
