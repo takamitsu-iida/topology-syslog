@@ -40,6 +40,8 @@ export function IncidentCard({ incident, onResolve }: Props) {
   const condition = getConditionBadge(incident)
   const impactCount = incident.rca_explanation.impact_objects.length
   const childCount = incident.child_incident_ids.length
+  const bgpSessionImpacts = incident.rca_explanation.impact_objects.filter((objectId) => objectId.startsWith('BGPSession:'))
+  const isBgpImpact = incident.relationship_type === 'impact' && incident.root_cause_object?.startsWith('BGPSession:')
 
   const cardCls = {
     OPEN:     incident.recurrence_count > 0
@@ -68,6 +70,11 @@ export function IncidentCard({ incident, onResolve }: Props) {
               {condition.label}
             </span>
           )}
+          {isBgpImpact && (
+            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+              BGP影響
+            </span>
+          )}
         </div>
       </div>
 
@@ -78,6 +85,22 @@ export function IncidentCard({ incident, onResolve }: Props) {
       <p className="mt-0.5 truncate text-sm text-gray-600">
         <span className="font-medium">イベント:</span> {incident.primary_event}
       </p>
+
+      {incident.parent_incident_id && (
+        <p className="mt-1 text-xs text-gray-600">
+          親インシデント:{' '}
+          <Link to={`/incidents/${incident.parent_incident_id}`} className="text-blue-600 hover:underline">
+            {incident.parent_incident_id}
+          </Link>
+        </p>
+      )}
+
+      {bgpSessionImpacts.length > 0 && (
+        <div className="mt-2 border-l-2 border-sky-300 pl-2 text-sm text-sky-900">
+          <span className="font-medium">BGP影響:</span>{' '}
+          {bgpSessionImpacts.join(', ')}
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
         <span>影響ノード: {incident.secondary_nodes.length}</span>
