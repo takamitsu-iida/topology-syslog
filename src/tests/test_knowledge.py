@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import _process_message_immediately, create_app
 from topology_syslog.ingestion.syslog_parser import parse
-from topology_syslog.knowledge.classifier import EventClassifier
+from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident
 from topology_syslog.knowledge.matcher import KnowledgeMatcher
 from topology_syslog.knowledge.policy import SeverityAction, resolve_severity_action
 from topology_syslog.knowledge.store import KnowledgeRule, KnowledgeStore
@@ -657,6 +657,25 @@ def test_sample_skb_retain_only_rule_suppresses_legacy_ignore_event(tmp_path):
         __import__("asyncio").run(_process_message_immediately(app, message))
         assert message.knowledge_status == "known"
         assert app.state.store.count() == 0
+
+
+def test_vendor_skb_pack_retains_cisco_pnp_startup_notifications():
+    matcher = KnowledgeMatcher(KnowledgeStore("configs/syslog_knowledge"))
+    samples = [
+        b"<134>Sep  6 09:13:03 Spine2 %PNP-6-PNP_CDP_UPDATE: Device UDI [PID:IOSv,VID:1.0,SN:9C6ZT6Z8QS77G13RUBRNP] identified for CDP",
+        b"<134>Sep  6 09:13:03 Spine2 %PNP-6-PNP_DISCOVERY_STOPPED: PnP Discovery stopped (Startup Config Present)",
+    ]
+
+    for raw in samples:
+        message = parse(raw, "10.0.0.2")
+        rule = matcher.classify(message)
+        result = EventClassifier().classify(message, rule)
+
+        assert message.vendor == "cisco-ios"
+        assert rule is not None
+        assert rule.rule_id == "cisco-pnp-startup-notification"
+        assert result.action == EventAction.RETAIN_ONLY
+        assert not can_create_new_incident(result)
 
 
 def test_vendor_skb_pack_matches_junos_bgp_down():

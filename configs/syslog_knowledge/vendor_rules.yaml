@@ -25,6 +25,22 @@ rules:
     confidence: 0.95
     priority: 95
 
+  - id: cisco-pnp-startup-notification
+    description: "Cisco IOS の起動時に PNP が発出する CDP 更新や discovery 停止などの通知。ノードの起動進行中を示す証跡として保持し、新規インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%PNP-*-PNP_*"
+    classification: informational
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 300
+    runbook:
+      - "show logging | include PNP"
+      - "show pnp status"
+    status: approved
+    confidence: 0.9
+    priority: 90
+
   - id: cisco-platform-signature-verified
     description: "Cisco IOS の起動時にソフトウェアイメージのコード署名検証が完了した通知。ノードの起動進行中を示す証跡として保持し、起動完了とはみなさない。"
     vendor: cisco-ios

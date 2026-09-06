@@ -97,10 +97,11 @@ export interface RawLogFilters {
   hostname?: string
   action?: string
   knowledgeStatus?: string
+  limit?: number
 }
 
 export const listRawLogs = (filters: RawLogFilters = {}): Promise<RawLogListResponse> => {
-  const params = new URLSearchParams({ limit: '100' })
+  const params = new URLSearchParams({ limit: String(filters.limit ?? 100) })
   if (filters.hostname) params.set('hostname', filters.hostname)
   if (filters.action) params.set('action', filters.action)
   if (filters.knowledgeStatus) params.set('knowledge_status', filters.knowledgeStatus)
