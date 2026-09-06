@@ -4,6 +4,7 @@ from topology_syslog.correlation.hypothesis_lifecycle import HypothesisIncidentL
 from topology_syslog.correlation.hypothesis_rca import HypothesisRCAEngine
 from topology_syslog.correlation.incident_projector import IncidentProjector
 from topology_syslog.correlation.observation import ObservationNormalizer
+from topology_syslog.api.main import _merge_projected_hypothesis_incident
 from topology_syslog.models import IncidentCondition, SyslogMessage
 from topology_syslog.topology.causal_topology import CausalTopology
 
@@ -165,3 +166,36 @@ def test_fault_after_recovery_marks_flapping_at_threshold():
     assert event.event_type == HypothesisLifecycleEventType.FLAPPING
     assert incident.condition == IncidentCondition.FLAPPING.value
     assert incident.flap_count == 1
+
+
+def test_existing_interface_root_is_upheld_when_later_bgp_impact_is_merged():
+    topology = _topology()
+    lifecycle = HypothesisIncidentLifecycle(topology)
+
+    assert lifecycle.is_causal_ancestor(
+        "Interface:Leaf1:GigabitEthernet0/0",
+        "BGPSession:Spine1-Leaf1-eBGP",
+    )
+
+
+def test_later_bgp_impact_does_not_replace_existing_interface_root():
+    topology = _topology()
+    projector = IncidentProjector(topology)
+    lifecycle = HypothesisIncidentLifecycle(topology)
+    bgp_fault = _observation(
+        topology,
+        _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down", 5),
+    )
+
+    first = projector.project(HypothesisRCAEngine(topology).infer([_msg(
+        "Leaf1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", 0,
+    )]))
+    later = projector.project(HypothesisRCAEngine(topology).infer([_msg(
+        "Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down", 5,
+    )]))
+
+    assert first is not None and later is not None
+    merged = _merge_projected_hypothesis_incident(first.incident, later.incident, bgp_fault, lifecycle)
+
+    assert merged.root_cause_object == "Interface:Leaf1:GigabitEthernet0/0"
+    assert merged.root_cause_node == "Leaf1"

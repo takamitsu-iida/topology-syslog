@@ -187,6 +187,88 @@ def test_down_up_events_recover_after_quiet_period(tmp_path):
     assert restored.condition == "RECOVERED"
 
 
+def test_down_after_recovery_updates_same_incident(tmp_path):
+    from datetime import datetime
+    from topology_syslog.models import Incident
+
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'repeated-recovery.db'}",
+        syslog_port=0,
+        node_monitor_event_token="event-token",
+        recovery_quiet_period_sec=0.01,
+        recovery_flap_threshold=2,
+    )
+    with TestClient(app) as test_client:
+        app.state.store.save(Incident(
+            incident_id="INC-REPEAT",
+            created_at=datetime.now().astimezone(),
+            root_cause_node="Spine2",
+            primary_event="node down",
+            condition="RECOVERED",
+        ))
+        response = test_client.post(
+            "/internal/node-state-events",
+            json={
+                "event_id": "event-repeat-down",
+                "event_type": "node_state.changed",
+                "node_id": "Spine2",
+                "state": "DOWN",
+            },
+            headers={"Authorization": "Bearer event-token"},
+        )
+
+    updated = app.state.store.get_by_id("INC-REPEAT")
+    assert response.json()["related_incident_ids"] == ["INC-REPEAT"]
+    assert response.json()["updated_incident_ids"] == ["INC-REPEAT"]
+    assert updated is not None
+    assert updated.condition == "DEGRADED"
+    assert updated.flap_count == 1
+
+
+def test_repeated_down_up_cycles_keep_updating_recovered_incident(tmp_path):
+    from datetime import datetime
+    from topology_syslog.models import Incident
+
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'repeated-cycles.db'}",
+        syslog_port=0,
+        node_monitor_event_token="event-token",
+        recovery_quiet_period_sec=0.01,
+        recovery_flap_threshold=2,
+    )
+    headers = {"Authorization": "Bearer event-token"}
+    with TestClient(app) as test_client:
+        app.state.store.save(Incident(
+            incident_id="INC-CYCLES",
+            created_at=datetime.now().astimezone(),
+            root_cause_node="Spine2",
+            primary_event="node down",
+            condition="RECOVERED",
+        ))
+        for event_id, state in [
+            ("cycle-1-down", "DOWN"),
+            ("cycle-1-up", "UP"),
+            ("cycle-2-down", "DOWN"),
+        ]:
+            response = test_client.post(
+                "/internal/node-state-events",
+                json={
+                    "event_id": event_id,
+                    "event_type": "node_state.changed",
+                    "node_id": "Spine2",
+                    "state": state,
+                },
+                headers=headers,
+            )
+            assert response.json()["related_incident_ids"] == ["INC-CYCLES"]
+
+    updated = app.state.store.get_by_id("INC-CYCLES")
+    assert updated is not None
+    assert updated.incident_id == "INC-CYCLES"
+    assert updated.condition == "FLAPPING"
+    assert updated.flap_count == 2
+
+
 def test_stale_event_is_accepted_but_not_applied(client, app):
     from datetime import datetime, timezone
     from topology_syslog.models import Incident

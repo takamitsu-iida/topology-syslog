@@ -108,6 +108,13 @@ def _find_matching_hypothesis_incident(open_incidents, root_object: str, lifecyc
 
 
 def _merge_projected_hypothesis_incident(existing, projected, observation, lifecycle: HypothesisIncidentLifecycle):
+    existing_root = _incident_root_cause_object(existing)
+    projected_root = projected.root_cause_object or _incident_root_cause_object(projected)
+    preserve_existing_root = (
+        existing_root is not None
+        and projected_root is not None
+        and lifecycle.is_causal_ancestor(existing_root, projected_root)
+    )
     projected.incident_id = existing.incident_id
     projected.created_at = existing.created_at
     projected.recurrence_count = existing.recurrence_count
@@ -121,6 +128,10 @@ def _merge_projected_hypothesis_incident(existing, projected, observation, lifec
     projected.status = existing.status
     projected.last_recovery_at = existing.last_recovery_at
     projected.last_fault_at = existing.last_fault_at
+    if preserve_existing_root:
+        projected.root_cause_object = existing.root_cause_object
+        projected.root_cause_node = existing.root_cause_node
+        projected.rca_explanation = existing.rca_explanation
     event = lifecycle.apply_fault(projected, observation)
     return event.incident if event.incident is not None else projected
 

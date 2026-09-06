@@ -86,8 +86,8 @@ async def _apply_state_event(
         )
         explanation.primary_candidate = candidate
     if any(
-        evidence.source == "node-monitor" and node_id in evidence.related_nodes
-        and state.lower() in evidence.summary.lower()
+        evidence.source == "node-monitor"
+        and payload["event_id"] in evidence.related_log_ids
         for evidence in candidate.evidences
     ):
         return False
@@ -103,6 +103,12 @@ async def _apply_state_event(
     score_rca_explanation(explanation, [])
     if state in {"DOWN", "DEGRADED"} and incident.condition == "ACTIVE":
         incident.condition = "DEGRADED"
+    elif state == "DOWN" and incident.condition in {"RECOVERED", "RECOVERING"}:
+        incident.flap_count += 1
+        if incident.flap_count >= request.app.state.recovery_flap_threshold:
+            incident.condition = "FLAPPING"
+        else:
+            incident.condition = "DEGRADED"
     elif state == "UP" and incident.condition == "DEGRADED":
         incident.condition = "RECOVERING"
         incident.last_recovery_at = observed_at
@@ -174,7 +180,7 @@ def _find_related_incidents(
     incidents = (
         request.app.state.store.list_open_lifecycle()
         if state == "UP"
-        else request.app.state.store.list_open_active()
+        else request.app.state.store.list_open_lifecycle()
     )
     direct_root = [incident for incident in incidents if incident.root_cause_node == node_id]
     if direct_root:

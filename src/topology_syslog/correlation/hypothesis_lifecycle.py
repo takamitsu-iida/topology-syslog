@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+import networkx as nx
+
 from topology_syslog.correlation.observation import Observation
 from topology_syslog.models import Incident, IncidentCondition
 from topology_syslog.topology.causal_topology import CausalTopology
@@ -127,6 +129,12 @@ class HypothesisIncidentLifecycle:
         if self._common_physical_link(root_object, observed_object) is not None:
             return True
         return observed_object in self._topology.graph.successors(root_object)
+
+    def is_causal_ancestor(self, root_object: str, affected_object: str) -> bool:
+        """Return whether a root object is upstream of an affected object."""
+        if root_object not in self._topology.graph or affected_object not in self._topology.graph:
+            return False
+        return root_object in nx.ancestors(self._topology.graph, affected_object)
 
     def _common_physical_link(self, object_a: str, object_b: str) -> str | None:
         links_a = {

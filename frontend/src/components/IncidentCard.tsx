@@ -6,14 +6,21 @@ interface Props {
   onResolve?: (id: string) => void
 }
 
-type StateBadge = { label: string; cls: string }
+type StatusBadge = { label: string; cls: string }
+type ConditionBadge = { label: string; cls: string }
 
 function confidenceLabel(value: number | null) {
   if (value === null) return 'RCA -'
   return `RCA ${Math.round(value * 100)}%`
 }
 
-function getStateBadge(incident: Incident): StateBadge {
+function getStatusBadge(incident: Incident): StatusBadge {
+  if (incident.status === 'OPEN')
+    return { label: 'オープン', cls: 'bg-red-100 text-red-700' }
+  return { label: 'クローズ済', cls: 'bg-gray-200 text-gray-600' }
+}
+
+function getConditionBadge(incident: Incident): ConditionBadge {
   if (incident.condition === 'RECOVERED')
     return { label: '復旧済', cls: 'bg-emerald-100 text-emerald-700' }
   if (incident.condition === 'RECOVERING')
@@ -22,16 +29,15 @@ function getStateBadge(incident: Incident): StateBadge {
     return { label: '部分復旧', cls: 'bg-yellow-100 text-yellow-700' }
   if (incident.condition === 'FLAPPING')
     return { label: 'フラッピング', cls: 'bg-amber-100 text-amber-700' }
-  if (incident.status === 'CLOSED' || incident.status === 'RESOLVED')
-    return { label: 'クローズ済', cls: 'bg-gray-200 text-gray-600' }
   if (incident.recurrence_count > 0)
     return { label: `再発 (${incident.recurrence_count + 1}回目)`, cls: 'bg-orange-100 text-orange-700' }
-  return { label: '新規発生', cls: 'bg-red-100 text-red-700' }
+  return { label: '障害継続中', cls: 'bg-red-100 text-red-700' }
 }
 
 export function IncidentCard({ incident, onResolve }: Props) {
   const isOpen = incident.status === 'OPEN'
-  const state = getStateBadge(incident)
+  const status = getStatusBadge(incident)
+  const condition = getConditionBadge(incident)
 
   const cardCls = {
     OPEN:     incident.recurrence_count > 0
@@ -51,9 +57,14 @@ export function IncidentCard({ incident, onResolve }: Props) {
         >
           {incident.incident_id}
         </Link>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${state.cls}`}>
-          {state.label}
-        </span>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${status.cls}`}>
+            {status.label}
+          </span>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${condition.cls}`}>
+            {condition.label}
+          </span>
+        </div>
       </div>
 
       <p className="mt-1 text-sm text-gray-700">
