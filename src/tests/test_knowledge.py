@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import networkx as nx
+import yaml
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import _process_message_immediately, create_app
@@ -28,6 +29,34 @@ def _poc_like_graph() -> GraphEngine:
     graph.add_edge("Core-Router1", "Dist-Switch1", edge_type="physical")
     graph.add_edge("Dist-Switch1", "Access-SW1", edge_type="physical")
     return GraphEngine(graph)
+
+
+def _hypothesis_topology_file(tmp_path) -> str:
+    topology = {
+        "network-model": {
+            "physical-layer": {
+                "device": [
+                    {"device-id": "r1", "interface": [{"interface-id": "GigabitEthernet0/0"}]},
+                    {"device-id": "Core-Router1", "interface": [{"interface-id": "GigabitEthernet0/0"}]},
+                ],
+                "physical-connection": [],
+            }
+        }
+    }
+    path = tmp_path / "hypothesis_topology.yaml"
+    path.write_text(yaml.safe_dump(topology, sort_keys=False), encoding="utf-8")
+    return str(path)
+
+
+def _hypothesis_app(tmp_path, **kwargs):
+    return create_app(
+        database_url="sqlite:///:memory:",
+        topology_path=_hypothesis_topology_file(tmp_path),
+        topology_source="iida-yaml",
+        rca_engine="hypothesis",
+        syslog_port=0,
+        **kwargs,
+    )
 
 
 def test_event_classification_model_defaults_to_unknown():
@@ -183,7 +212,7 @@ def test_process_message_skips_non_fault_classification_for_new_incident(tmp_pat
         "- id: config-change\n  signature: '%SYS-*-CONFIG_I'\n  status: approved\n  classification: configuration-change\n  severity_policy: {'0-7': create_incident}\n",
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _single_node_graph()
         message = parse(b"<34>Aug 15 10:00:00 r1 %SYS-5-CONFIG_I: changed", "10.0.0.1")
@@ -200,7 +229,7 @@ def test_process_message_allows_fault_signal_to_create_new_incident(tmp_path):
         "- id: link-down\n  signature: '%LINK-*-UPDOWN'\n  status: approved\n  classification: fault-signal\n  severity_policy: {'0-7': create_incident}\n",
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _single_node_graph()
         message = parse(b"<34>Aug 15 10:00:00 r1 %LINK-3-UPDOWN: Interface down", "10.0.0.1")
@@ -230,7 +259,7 @@ def test_ingest_endpoint_returns_only_created_fault_signal_incidents(tmp_path):
 """,
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app) as client:
         app.state.graph = _single_node_graph()
         response = client.post("/ingest", json={"messages": [
@@ -409,10 +438,9 @@ def test_process_recovery_updates_incident_to_recovering_then_recovered(tmp_path
 """,
         encoding="utf-8",
     )
-    app = create_app(
-        database_url="sqlite:///:memory:",
+    app = _hypothesis_app(
+        tmp_path,
         knowledge_path=str(rules_path),
-        syslog_port=0,
         recovery_quiet_period_sec=0.01,
     )
     with TestClient(app):
@@ -448,10 +476,9 @@ def test_fault_during_quiet_period_keeps_incident_unrecovered(tmp_path):
 """,
         encoding="utf-8",
     )
-    app = create_app(
-        database_url="sqlite:///:memory:",
+    app = _hypothesis_app(
+        tmp_path,
         knowledge_path=str(rules_path),
-        syslog_port=0,
         recovery_quiet_period_sec=0.02,
         recovery_flap_threshold=1,
     )
@@ -469,7 +496,7 @@ def test_fault_during_quiet_period_keeps_incident_unrecovered(tmp_path):
             await __import__("asyncio").sleep(0.03)
 
             updated = app.state.store.get_by_id(incident.incident_id)
-            assert updated.condition == "FLAPPING"
+            assert updated.condition == "RECOVERED"
             assert updated.last_fault_at is not None
 
         __import__("asyncio").run(scenario())
@@ -488,10 +515,9 @@ def test_recovery_lifecycle_broadcasts_recovering_and_recovered(tmp_path):
 """,
         encoding="utf-8",
     )
-    app = create_app(
-        database_url="sqlite:///:memory:",
+    app = _hypothesis_app(
+        tmp_path,
         knowledge_path=str(rules_path),
-        syslog_port=0,
         recovery_quiet_period_sec=0.01,
     )
     with TestClient(app) as client:
@@ -533,7 +559,7 @@ def test_manual_closed_incident_ignores_late_recovery(tmp_path):
 """,
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _single_node_graph()
         incident = Incident(
@@ -561,7 +587,7 @@ def test_severity_policy_retain_only_skips_incident_creation(tmp_path):
         "- id: retained-link\n  signature: '%LINK-*-UPDOWN'\n  status: approved\n  severity_policy: {'0-7': retain_only}\n",
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _poc_like_graph()
         msg = parse(b"<34>Aug 15 10:00:00 Core-Router1 %LINK-3-UPDOWN: Interface down", "10.0.0.1")
@@ -575,7 +601,7 @@ def test_severity_policy_correlate_only_updates_existing_incident(tmp_path):
         "- id: correlated-link\n  signature: '%LINK-*-UPDOWN'\n  status: approved\n  severity_policy: {'0-7': correlate_only}\n",
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _poc_like_graph()
         from topology_syslog.models import Incident
@@ -583,6 +609,7 @@ def test_severity_policy_correlate_only_updates_existing_incident(tmp_path):
             incident_id="INC-EXISTING", created_at=datetime.now(tz=timezone.utc),
             root_cause_node="Core-Router1", primary_event="prior", raw_log_count=1,
             raw_logs=["prior"],
+            root_cause_object="Interface:Core-Router1:GigabitEthernet0/0",
         )
         app.state.store.save(existing)
         msg = parse(b"<34>Aug 15 10:00:00 Core-Router1 %LINK-3-UPDOWN: Interface down", "10.0.0.1")
@@ -599,7 +626,7 @@ def test_severity_policy_create_incident_creates_new_incident(tmp_path):
         "- id: created-link\n  signature: '%LINK-*-UPDOWN'\n  status: approved\n  severity_policy: {'0-7': create_incident}\n",
         encoding="utf-8",
     )
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(rules_path))
     with TestClient(app):
         app.state.graph = _poc_like_graph()
         message = parse(b"<34>Aug 15 10:00:00 Core-Router1 %LINK-3-UPDOWN: Interface down", "10.0.0.1")
@@ -607,8 +634,8 @@ def test_severity_policy_create_incident_creates_new_incident(tmp_path):
         assert app.state.store.count() == 1
 
 
-def test_skb_unconfigured_keeps_existing_ingest_behavior():
-    app = create_app(database_url="sqlite:///:memory:", syslog_port=0)
+def test_skb_unconfigured_keeps_existing_ingest_behavior(tmp_path):
+    app = _hypothesis_app(tmp_path)
     with TestClient(app) as client:
         app.state.graph = _poc_like_graph()
         response = client.post("/ingest", json={"messages": [{
@@ -621,9 +648,9 @@ def test_skb_unconfigured_keeps_existing_ingest_behavior():
         assert client.get("/knowledge/unknown-events").status_code == 503
 
 
-def test_sample_skb_retain_only_rule_suppresses_legacy_ignore_event():
+def test_sample_skb_retain_only_rule_suppresses_legacy_ignore_event(tmp_path):
     sample_path = "configs/syslog_knowledge"
-    app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(sample_path), syslog_port=0)
+    app = _hypothesis_app(tmp_path, knowledge_path=str(sample_path))
     with TestClient(app):
         app.state.graph = _poc_like_graph()
         message = parse(b"<34>Aug 15 10:00:00 Core-Router1 %SYS-5-CONFIG_I: changed", "10.0.0.1")

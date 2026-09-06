@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from topology_syslog.api.schemas import IncidentOut
 from topology_syslog.correlation.confidence import score_rca_explanation
-from topology_syslog.models import Incident, RCAEvidence, RCACandidate
+from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -52,6 +52,15 @@ async def receive_node_state_event(
         }
 
     related, match_type = _find_related_incidents(request, node_id, state=state)
+    if state == "DOWN" and not related:
+        incident = _create_node_state_incident(request, node_id, payload, observed_at)
+        await asyncio.to_thread(request.app.state.store.save, incident)
+        await request.app.state.ws_manager.broadcast({
+            "type": "incident.new",
+            "incident": IncidentOut.model_validate(incident).model_dump(mode="json"),
+        })
+        related = [incident]
+        match_type = "new_incident"
     updated = []
     for incident in related:
         if await _apply_state_event(request, incident, payload, observed_at):
@@ -177,11 +186,9 @@ def _find_related_incidents(
     state: str = "DOWN",
 ) -> tuple[list[Incident], str]:
     """OPEN インシデントを直接一致、次にトポロジー一致の順で返す。"""
-    incidents = (
-        request.app.state.store.list_open_lifecycle()
-        if state == "UP"
-        else request.app.state.store.list_open_lifecycle()
-    )
+    incidents = request.app.state.store.list_open_lifecycle()
+    if state in {"DOWN", "UP"}:
+        incidents = [incident for incident in incidents if incident.condition != "RECOVERED"]
     direct_root = [incident for incident in incidents if incident.root_cause_node == node_id]
     if direct_root:
         return direct_root, "root_cause"
@@ -206,3 +213,34 @@ def _find_related_incidents(
         ):
             related.append(incident)
     return related, "topology" if related else "none"
+
+
+def _create_node_state_incident(
+    request: Request,
+    node_id: str,
+    payload: dict,
+    observed_at: datetime,
+) -> Incident:
+    existing = request.app.state.store.list_incidents()
+    date_key = observed_at.strftime("%Y%m%d")
+    sequence = sum(incident.incident_id.startswith(f"INC-{date_key}-") for incident in existing) + 1
+    summary = f"{node_id} is down according to node monitor: {payload.get('reason', '')}"
+    evidence = RCAEvidence(
+        source="node-monitor",
+        summary=summary,
+        weight=0.0,
+        related_nodes=[node_id],
+        related_log_ids=[str(payload["event_id"])],
+    )
+    return Incident(
+        incident_id=f"INC-{date_key}-{sequence:03d}",
+        created_at=observed_at,
+        root_cause_node=node_id,
+        primary_event=summary,
+        condition="ACTIVE",
+        last_fault_at=observed_at,
+        rca_explanation=RCAExplanation(
+            confidence=0.0,
+            primary_candidate=RCACandidate(node_id=node_id, confidence=0.0, evidences=[evidence]),
+        ),
+    )

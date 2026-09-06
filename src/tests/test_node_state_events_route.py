@@ -22,7 +22,7 @@ def test_node_state_event_endpoint_requires_token_and_is_idempotent(tmp_path):
     assert first.json()["status"] == "accepted"
     assert first.json()["duplicate"] is False
     assert first.json()["event_id"] == "event-1"
-    assert first.json()["related_incident_ids"] == []
+    assert first.json()["related_incident_ids"] == ["INC-20260906-001"]
     assert first.json()["updated_incident_ids"] == []
     assert duplicate.json()["duplicate"] is True
 
@@ -187,7 +187,7 @@ def test_down_up_events_recover_after_quiet_period(tmp_path):
     assert restored.condition == "RECOVERED"
 
 
-def test_down_after_recovery_updates_same_incident(tmp_path):
+def test_down_after_recovery_creates_new_incident(tmp_path):
     from datetime import datetime
     from topology_syslog.models import Incident
 
@@ -218,14 +218,16 @@ def test_down_after_recovery_updates_same_incident(tmp_path):
         )
 
     updated = app.state.store.get_by_id("INC-REPEAT")
-    assert response.json()["related_incident_ids"] == ["INC-REPEAT"]
-    assert response.json()["updated_incident_ids"] == ["INC-REPEAT"]
+    assert response.json()["related_incident_ids"] == ["INC-20260906-001"]
+    assert response.json()["updated_incident_ids"] == []
     assert updated is not None
-    assert updated.condition == "DEGRADED"
-    assert updated.flap_count == 1
+    assert updated.condition == "RECOVERED"
+    new_incident = app.state.store.get_by_id("INC-20260906-001")
+    assert new_incident is not None
+    assert new_incident.condition == "ACTIVE"
 
 
-def test_repeated_down_up_cycles_keep_updating_recovered_incident(tmp_path):
+def test_repeated_down_up_cycles_create_new_incident_after_recovery(tmp_path):
     from datetime import datetime
     from topology_syslog.models import Incident
 
@@ -260,13 +262,16 @@ def test_repeated_down_up_cycles_keep_updating_recovered_incident(tmp_path):
                 },
                 headers=headers,
             )
-            assert response.json()["related_incident_ids"] == ["INC-CYCLES"]
+            expected_id = "INC-20260906-001"
+            assert response.json()["related_incident_ids"] == [expected_id]
 
     updated = app.state.store.get_by_id("INC-CYCLES")
     assert updated is not None
     assert updated.incident_id == "INC-CYCLES"
-    assert updated.condition == "FLAPPING"
-    assert updated.flap_count == 2
+    assert updated.condition == "RECOVERED"
+    new_incident = app.state.store.get_by_id("INC-20260906-001")
+    assert new_incident is not None
+    assert new_incident.condition == "DEGRADED"
 
 
 def test_stale_event_is_accepted_but_not_applied(client, app):

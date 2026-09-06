@@ -39,6 +39,7 @@ from topology_syslog.correlation.root_cause_inferencer import RootCauseInference
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
 from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident, should_skip_inference
+from topology_syslog.models import EventClassification
 from topology_syslog.notification.base import NotificationEvent
 from topology_syslog.persistence.incident_store import IncidentStore
 from topology_syslog.persistence.investigation_store import InvestigationStore
@@ -418,6 +419,14 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     lifecycle = getattr(app.state, "hypothesis_lifecycle", None)
     if normalizer is None or buffer is None or projector is None or lifecycle is None:
         _logger.warning("Hypothesis RCA requested but hypothesis engine is not available")
+        return []
+
+    if classification_result.classification in {
+        EventClassification.CONFIG_CHANGE,
+        EventClassification.SECURITY,
+        EventClassification.NOISE,
+        EventClassification.RETAIN_ONLY,
+    }:
         return []
 
     observation = normalizer.normalize(msg, rule)

@@ -8,6 +8,39 @@
 
 rules:
   # Cisco IOS / NX-OS -------------------------------------------------------
+  - id: cisco-pnp-best-udi-update
+    description: "Cisco IOS の起動時に PNP が最適な UDI（PID/VID/SN）を検出した通知。ノードの起動進行中を示す証跡として保持し、起動完了とはみなさない。"
+    vendor: cisco-ios
+    signature: "%PNP-*-PNP_BEST_UDI_UPDATE"
+    classification: informational
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 300
+    runbook:
+      - "show version"
+      - "show inventory"
+      - "show logging | include PNP_BEST_UDI_UPDATE"
+    status: approved
+    confidence: 0.95
+    priority: 95
+
+  - id: cisco-platform-signature-verified
+    description: "Cisco IOS の起動時にソフトウェアイメージのコード署名検証が完了した通知。ノードの起動進行中を示す証跡として保持し、起動完了とはみなさない。"
+    vendor: cisco-ios
+    signature: "%PLATFORM-*-SIGNATURE_VERIFIED"
+    classification: informational
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 300
+    runbook:
+      - "show version"
+      - "show logging | include SIGNATURE_VERIFIED"
+    status: approved
+    confidence: 0.95
+    priority: 95
+
   - id: cisco-nxos-ethpm-link-flap
     description: "Cisco NX-OS の Ethernet ポート状態変化。物理リンク障害の root cause 候補として扱う。"
     vendor: cisco-ios
