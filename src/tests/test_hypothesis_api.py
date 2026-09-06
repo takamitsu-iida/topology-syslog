@@ -123,7 +123,7 @@ def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_r
                 "raw": "<35>Sep 5 08:13:20.022 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
             },
         ]})
-        incidents = client.get("/incidents").json()["incidents"]
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
 
     assert first_down.status_code == 200
     assert first_up.status_code == 200
@@ -163,13 +163,39 @@ def test_hypothesis_ingest_keeps_repeated_leaf2_spine2_flap_in_one_incident():
             ]})
             assert response.status_code == 200
 
-        incidents = client.get("/incidents").json()["incidents"]
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
 
     assert len(incidents) == 1
     incident = incidents[0]
     assert incident["condition"] == "FLAPPING"
     assert incident["flap_count"] == 1
     assert [entry["state"] for entry in incident["flap_history"]] == ["down", "up", "down", "up"]
+
+
+def test_hypothesis_ingest_persists_bgp_impact_as_child_incident():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        rca_engine="hypothesis",
+        syslog_port=0,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:06.021 Leaf2 %BGP-5-ADJCHANGE: neighbor Spine1 down",
+            },
+        ]})
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
+
+    assert response.status_code == 200
+    parent = next(incident for incident in incidents if incident["relationship_type"] == "root")
+    child = next(incident for incident in incidents if incident["relationship_type"] == "impact")
+    assert parent["child_incident_ids"] == [child["incident_id"]]
+    assert child["parent_incident_id"] == parent["incident_id"]
+    assert child["root_cause_object"].startswith("BGPSession:")
 
 
 def test_migration_readiness_api_evaluates_labeled_samples_without_saving():

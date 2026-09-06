@@ -40,6 +40,9 @@ class _IncidentRow(_Base):
     recovery_evidence    = Column(JSON,     nullable=False, server_default="[]")
     flap_history         = Column(JSON,     nullable=False, server_default="[]")
     rca_explanation      = Column(JSON,     nullable=False, server_default="{}")
+    parent_incident_id   = Column(String,   nullable=True)
+    child_incident_ids   = Column(JSON,     nullable=False, server_default="[]")
+    relationship_type    = Column(String,   nullable=False, server_default="'root'")
 
 
 class _RCAEvaluationRow(_Base):
@@ -81,6 +84,9 @@ def _to_row(inc: Incident) -> _IncidentRow:
         recovery_evidence=inc.recovery_evidence,
         flap_history=inc.flap_history,
         rca_explanation=_rca_to_json(inc.rca_explanation),
+        parent_incident_id=inc.parent_incident_id,
+        child_incident_ids=inc.child_incident_ids,
+        relationship_type=inc.relationship_type,
     )
 
 
@@ -104,6 +110,9 @@ def _from_row(row: _IncidentRow) -> Incident:
         recovery_evidence=list(row.recovery_evidence or []),
         flap_history=list(row.flap_history or []),
         rca_explanation=_rca_from_json(dict(row.rca_explanation or {})),
+        parent_incident_id=row.parent_incident_id,
+        child_incident_ids=list(row.child_incident_ids or []),
+        relationship_type=row.relationship_type or "root",
     )
 
 
@@ -128,6 +137,9 @@ class IncidentStore:
                 "ALTER TABLE incidents ADD COLUMN recovery_evidence JSON DEFAULT '[]'",
                 "ALTER TABLE incidents ADD COLUMN flap_history JSON DEFAULT '[]'",
                 "ALTER TABLE incidents ADD COLUMN rca_explanation JSON DEFAULT '{}'",
+                "ALTER TABLE incidents ADD COLUMN parent_incident_id TEXT",
+                "ALTER TABLE incidents ADD COLUMN child_incident_ids JSON DEFAULT '[]'",
+                "ALTER TABLE incidents ADD COLUMN relationship_type TEXT NOT NULL DEFAULT 'root'",
             ]:
                 try:
                     conn.execute(text(ddl))
@@ -163,6 +175,9 @@ class IncidentStore:
             row.recovery_evidence = incident.recovery_evidence
             row.flap_history = incident.flap_history
             row.rca_explanation = _rca_to_json(incident.rca_explanation)
+            row.parent_incident_id = incident.parent_incident_id
+            row.child_incident_ids = incident.child_incident_ids
+            row.relationship_type = incident.relationship_type
             session.commit()
             return True
 
@@ -211,9 +226,12 @@ class IncidentStore:
         condition: str | None = None,
         from_dt: datetime | None = None,
         to_dt: datetime | None = None,
+        include_children: bool = False,
     ) -> list[Incident]:
         with Session(self._engine) as session:
             stmt = select(_IncidentRow)
+            if not include_children:
+                stmt = stmt.where(_IncidentRow.parent_incident_id.is_(None))
             if status:
                 stmt = stmt.where(_IncidentRow.status == status)
             if condition:
@@ -246,6 +264,25 @@ class IncidentStore:
                 .order_by(desc(_IncidentRow.created_at))
             ).all()
             return [_from_row(r) for r in rows]
+
+    def list_children(self, parent_incident_id: str) -> list[Incident]:
+        with Session(self._engine) as session:
+            rows = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.parent_incident_id == parent_incident_id)
+                .order_by(desc(_IncidentRow.created_at))
+            ).all()
+            return [_from_row(row) for row in rows]
+
+    def find_child_incident(self, parent_incident_id: str, impact_object: str) -> Incident | None:
+        with Session(self._engine) as session:
+            row = session.scalars(
+                select(_IncidentRow)
+                .where(_IncidentRow.parent_incident_id == parent_incident_id)
+                .where(_IncidentRow.root_cause_object == impact_object)
+                .limit(1)
+            ).first()
+            return _from_row(row) if row is not None else None
 
     def resolve(self, incident_id: str) -> bool:
         """オペレーターによるインシデントのクローズ（status = CLOSED）。"""
@@ -398,6 +435,7 @@ def _rca_to_json(explanation: RCAExplanation) -> dict:
             candidate for candidate in (_candidate_to_json(item) for item in explanation.alternative_candidates)
             if candidate is not None
         ],
+        "impact_objects": explanation.impact_objects,
     }
 
 
@@ -431,6 +469,7 @@ def _rca_from_json(raw: dict) -> RCAExplanation:
             candidate for candidate in (_candidate_from_json(item) for item in raw.get("alternative_candidates") or [])
             if candidate is not None
         ],
+        impact_objects=list(raw.get("impact_objects") or []),
     )
 
 

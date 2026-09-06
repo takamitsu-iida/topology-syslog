@@ -108,6 +108,7 @@ class IncidentProjector:
             confidence=result.confidence,
             primary_candidate=primary,
             alternative_candidates=alternatives,
+            impact_objects=_impact_objects(result),
         )
 
     def _new_id(self, created_at: datetime) -> str:
@@ -129,3 +130,10 @@ def _first_observed_at(observations: tuple[Observation, ...]) -> datetime | None
 def _last_fault_at(observations: tuple[Observation, ...]) -> datetime | None:
     faults = [observation.observed_at for observation in observations if observation.assertion == "fault"]
     return max(faults, default=None)
+
+
+def _impact_objects(result: RCAResult) -> list[str]:
+    return list(dict.fromkeys(
+        observation.observed_object for observation in result.observations
+        if observation.observed_object != result.root_cause_object
+    ))

@@ -155,11 +155,19 @@ class HypothesisScorer:
         for observation in observations:
             observed_object = observation.observed_object
             if observed_object in self._topology.graph:
-                candidates.add(observed_object)
-                candidates.update(nx.ancestors(self._topology.graph, observed_object))
-                candidates.update(self._topology.graph.predecessors(observed_object))
+                candidates.update(
+                    candidate for candidate in (
+                        observed_object,
+                        *nx.ancestors(self._topology.graph, observed_object),
+                        *self._topology.graph.predecessors(observed_object),
+                    )
+                    if self._is_root_cause_candidate(candidate)
+                )
             candidates.add(device_object_id(observation.source_node))
         return candidates
+
+    def _is_root_cause_candidate(self, object_id: str) -> bool:
+        return self._topology.object_type(object_id) in {"device", "interface", "physical-link"}
 
     def _distance(self, candidate: str, observed_object: str) -> int | None:
         if candidate == observed_object:
@@ -209,7 +217,6 @@ def _specificity_score(object_type: str) -> float:
     return {
         "physical-link": 28.0,
         "interface": 24.0,
-        "bgp-session": 24.0,
         "device": 8.0,
     }.get(object_type, 0.0)
 
@@ -218,7 +225,6 @@ def _object_type_rank(object_type: str) -> int:
     return {
         "physical-link": 4,
         "interface": 3,
-        "bgp-session": 3,
         "device": 2,
     }.get(object_type, 0)
 

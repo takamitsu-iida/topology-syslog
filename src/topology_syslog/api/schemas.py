@@ -32,6 +32,7 @@ class RCAExplanationOut(BaseModel):
     confidence: float | None = None
     primary_candidate: RCACandidateOut | None = None
     alternative_candidates: list[RCACandidateOut]
+    impact_objects: list[str] = []
 
 
 class RCAEvaluationOut(BaseModel):
@@ -65,6 +66,9 @@ class IncidentOut(BaseModel):
     recovery_evidence: list[str] = []
     flap_history: list[dict[str, object]] = []
     rca_explanation: RCAExplanationOut
+    parent_incident_id: str | None = None
+    child_incident_ids: list[str] = []
+    relationship_type: str = "root"
 
 
 class IncidentListOut(BaseModel):

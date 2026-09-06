@@ -24,7 +24,7 @@ Raw SYSLOG
   -> Store / Notification / UI
 ```
 
-この方式では、根本原因を装置単位だけでなく、`Device` / `Interface` / `PhysicalLink` / `BGPSession` として扱います。リンク障害、装置障害、単体インターフェース障害、BGP セッション障害、サイレント障害、復旧イベントを同じ枠組みで評価できます。
+この方式では、根本原因を装置単位だけでなく、`Device` / `Interface` / `PhysicalLink` として扱います。`BGPSession` は根本原因ではなく、物理リンク、インターフェース、装置障害から派生する影響・観測事実として評価します。リンク障害、装置障害、単体インターフェース障害、BGP セッション断、サイレント障害、復旧イベントを同じ枠組みで評価できます。
 
 ---
 
@@ -34,10 +34,10 @@ Raw SYSLOG
 |---|---|
 | SYSLOG 受信 | UDP 受信、`/ingest` API、ファイル/標準入力取り込みに対応 |
 | Hypothesis-Based RCA | Observation 群から root cause object を推定し、score / confidence / 根拠を保存 |
-| Causal Topology | Device / Interface / PhysicalLink / BGPSession を原因候補としてグラフ化 |
+| Causal Topology | Device / Interface / PhysicalLink を原因候補としてグラフ化し、BGPSession は影響オブジェクトとして関連付け |
 | SYSLOG Knowledge Base | SKB と Severity policy により `fault-signal` / `state-change` / `recovery` / `retain-only` へ分類 |
 | Observation Buffer | event time ベースの短時間 window で遅延到着ログを扱い、RCA 改訂を可能にする |
-| Incident Projection | `RCAResult` を既存 `Incident` モデルへ投影し、API/UI/通知へ接続 |
+| Incident Projection | `RCAResult` を既存 `Incident` モデルへ投影し、root cause、影響オブジェクト、親子 Incident 関係を API/UI/通知へ接続 |
 | 復旧 Lifecycle | recovery Observation により `RECOVERING` / `RECOVERED` / `FLAPPING` を更新 |
 | 比較・移行 API | legacy / hypothesis の差分確認、ラベル付きサンプルによる移行評価 |
 | Web UI | React + Cytoscape.js によるインシデント、トポロジー、RCA 根拠表示 |
@@ -145,14 +145,14 @@ RCA_ENGINE=legacy make restart
 
 ### 1. Causal Object
 
-トポロジーから原因候補になり得る object を作成します。
+トポロジーから原因候補になり得る object と、原因から派生する影響 object を作成します。
 
 | Object | 例 | 用途 |
 |---|---|---|
 | `Device` | `Device:Spine1` | 装置停止、サイレント障害 |
 | `Interface` | `Interface:Leaf1:GigabitEthernet0/0` | 単体インターフェース障害 |
 | `PhysicalLink` | `PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0` | 両端 IF / BGP 断をまとめる物理リンク障害 |
-| `BGPSession` | `BGPSession:Spine1-Leaf1-eBGP` | BGP のみの論理障害 |
+| `BGPSession` | `BGPSession:Spine1-Leaf1-eBGP` | BGP down の影響・観測対象。root cause にはせず、上位の Link / Interface / Device の根拠に使う |
 
 ### 2. Observation
 
@@ -184,12 +184,12 @@ Observation:
 
 ### 3. Hypothesis Scoring
 
-Observation 群を説明できる root cause object を候補化し、score を計算します。
+Observation 群を説明できる root cause object を候補化し、score を計算します。root cause object は `Device` / `Interface` / `PhysicalLink` に限定し、`BGPSession` Observation は影響 evidence として上位候補の採点に使います。
 
 | Score component | 意味 |
 |---|---|
 | `coverage` | 候補が説明できる Observation 数 |
-| `specificity` | Device より Link / Interface / Session を優先する条件 |
+| `specificity` | Device より Link / Interface を優先する条件 |
 | `direct_evidence` | 候補自身が直接観測された強さ |
 | `evidence_strength` | Observation confidence の平均 |
 | `silent_peer` | 複数装置が同じ peer down を報告した場合の silent root 根拠 |
@@ -211,12 +211,18 @@ score component は `rca_explanation` に保存され、API/UI/AI レポート�
 
 | Incident field | 生成元 |
 |---|---|
-| `root_cause_object` | Hypothesis が選択した根本原因オブジェクト（PhysicalLink / Device / Interface / BGPSession） |
+| `root_cause_object` | Hypothesis が選択した根本原因オブジェクト（PhysicalLink / Device / Interface） |
 | `root_cause_node` | 互換用の代表 Device。リンク障害では表示上の補助情報 |
 | `primary_event` | 最初の Observation raw message |
 | `secondary_nodes` | root 以外の発報元 node |
 | `raw_logs` | Observation の raw message |
 | `rca_explanation` | Hypothesis score component |
+| `rca_explanation.impact_objects` | root cause ではないが同じ障害で観測された影響オブジェクト。BGP session down など |
+| `parent_incident_id` | 子 Incident の親 Incident ID。root Incident では `null` |
+| `child_incident_ids` | 親 Incident に紐づく子 Incident ID 一覧 |
+| `relationship_type` | `root` または `impact`。BGP session down などは `impact` 子 Incident として保存 |
+
+通常の `/incidents` は root Incident を中心に返します。子 Incident も含めて確認する場合は `include_children=true` を指定します。
 
 ---
 
@@ -236,6 +242,8 @@ Leaf1 : %BGP-5-ADJCHANGE neighbor Spine1 down
 root_cause_object = PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0
 root_cause_node   = Spine1 または Leaf1 の代表Device
 secondary_nodes   = 発報元のうち代表root以外
+impact_objects    = [BGPSession:Spine1-Leaf1-eBGP]
+child_incident_ids = [INC-YYYYMMDD-NNN-CH001]
 ```
 
 ### Spine 障害
@@ -253,7 +261,7 @@ root_cause_object = Device:Spine1
 secondary_nodes   = [Leaf1, Leaf2, Leaf3]
 ```
 
-### BGP セッション障害
+### BGP セッション断
 
 ```text
 Leaf1: %BGP-5-ADJCHANGE neighbor Spine1 down
@@ -262,7 +270,11 @@ Leaf1: %BGP-5-ADJCHANGE neighbor Spine1 down
 結果:
 
 ```text
-root_cause_object = BGPSession:Spine1-Leaf1-eBGP
+root_cause_object = PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0 または関連 Device / Interface
+impact_objects    = [BGPSession:Spine1-Leaf1-eBGP]
+relationship_type  = root
+子Incident         = relationship_type=impact, root_cause_object=BGPSession:Spine1-Leaf1-eBGP
+BGP session down は root cause ではなく影響 evidence として扱う
 ```
 
 ### Silent peer 障害

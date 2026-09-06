@@ -177,8 +177,7 @@ def test_existing_interface_root_is_upheld_when_later_bgp_impact_is_merged():
         "BGPSession:Spine1-Leaf1-eBGP",
     )
 
-
-def test_later_bgp_impact_does_not_replace_existing_interface_root():
+def test_later_bgp_impact_can_refine_existing_interface_root_to_physical_link():
     topology = _topology()
     projector = IncidentProjector(topology)
     lifecycle = HypothesisIncidentLifecycle(topology)
@@ -197,5 +196,5 @@ def test_later_bgp_impact_does_not_replace_existing_interface_root():
     assert first is not None and later is not None
     merged = _merge_projected_hypothesis_incident(first.incident, later.incident, bgp_fault, lifecycle)
 
-    assert merged.root_cause_object == "Interface:Leaf1:GigabitEthernet0/0"
-    assert merged.root_cause_node == "Leaf1"
+    assert merged.root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert merged.root_cause_node == "Spine1"

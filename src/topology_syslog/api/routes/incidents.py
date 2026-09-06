@@ -21,9 +21,16 @@ def list_incidents(
     condition: str | None = None,
     from_dt: datetime | None = None,
     to_dt: datetime | None = None,
+    include_children: bool = False,
     store: IncidentStore = Depends(_get_store),
 ) -> IncidentListOut:
-    incidents = store.list_incidents(status=status, condition=condition, from_dt=from_dt, to_dt=to_dt)
+    incidents = store.list_incidents(
+        status=status,
+        condition=condition,
+        from_dt=from_dt,
+        to_dt=to_dt,
+        include_children=include_children,
+    )
     return IncidentListOut(
         incidents=[IncidentOut.model_validate(i) for i in incidents],
         total=len(incidents),

@@ -168,12 +168,38 @@ def test_save_and_get_preserves_root_cause_object():
     store = _store()
     inc = _inc()
     inc.root_cause_object = "PhysicalLink:Leaf1:GE0/0--Spine1:GE0/0"
+    inc.rca_explanation.impact_objects = ["BGPSession:Spine1-Leaf1-eBGP"]
     store.save(inc)
 
     result = store.get_by_id(inc.incident_id)
 
     assert result is not None
     assert result.root_cause_object == "PhysicalLink:Leaf1:GE0/0--Spine1:GE0/0"
+    assert result.rca_explanation.impact_objects == ["BGPSession:Spine1-Leaf1-eBGP"]
+
+
+def test_save_and_get_preserves_incident_relationships():
+    store = _store()
+    parent = _inc("INC-PARENT")
+    parent.child_incident_ids = ["INC-PARENT-CH001"]
+    child = _inc("INC-PARENT-CH001")
+    child.parent_incident_id = parent.incident_id
+    child.relationship_type = "impact"
+    child.root_cause_object = "BGPSession:Spine1-Leaf1-eBGP"
+
+    store.save(parent)
+    store.save(child)
+
+    loaded_parent = store.get_by_id(parent.incident_id)
+    loaded_child = store.find_child_incident(parent.incident_id, "BGPSession:Spine1-Leaf1-eBGP")
+    children = store.list_children(parent.incident_id)
+
+    assert loaded_parent is not None
+    assert loaded_parent.child_incident_ids == ["INC-PARENT-CH001"]
+    assert loaded_child is not None
+    assert loaded_child.parent_incident_id == parent.incident_id
+    assert loaded_child.relationship_type == "impact"
+    assert [incident.incident_id for incident in children] == ["INC-PARENT-CH001"]
 
 
 def test_update_missing_incident_returns_false():

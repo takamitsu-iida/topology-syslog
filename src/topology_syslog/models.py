@@ -70,6 +70,7 @@ class RCAExplanation:
     confidence: float | None = None
     primary_candidate: RCACandidate | None = None
     alternative_candidates: list[RCACandidate] = field(default_factory=list)
+    impact_objects: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -156,3 +157,6 @@ class Incident:
     flap_history: list[dict[str, object]] = field(default_factory=list)
     rca_explanation: RCAExplanation = field(default_factory=RCAExplanation)
     root_cause_object: str | None = None
+    parent_incident_id: str | None = None
+    child_incident_ids: list[str] = field(default_factory=list)
+    relationship_type: str = "root"

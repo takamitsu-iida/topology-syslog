@@ -38,6 +38,8 @@ export function IncidentCard({ incident, onResolve }: Props) {
   const isOpen = incident.status === 'OPEN'
   const status = getStatusBadge(incident)
   const condition = getConditionBadge(incident)
+  const impactCount = incident.rca_explanation.impact_objects.length
+  const childCount = incident.child_incident_ids.length
 
   const cardCls = {
     OPEN:     incident.recurrence_count > 0
@@ -79,6 +81,8 @@ export function IncidentCard({ incident, onResolve }: Props) {
 
       <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
         <span>影響ノード: {incident.secondary_nodes.length}</span>
+        {impactCount > 0 && <span>影響オブジェクト: {impactCount}</span>}
+        {childCount > 0 && <span>子インシデント: {childCount}</span>}
         <span>ログ数: {incident.raw_log_count}</span>
         <span>{confidenceLabel(incident.rca_explanation.confidence)}</span>
         <span>{new Date(incident.created_at).toLocaleString('ja-JP')}</span>

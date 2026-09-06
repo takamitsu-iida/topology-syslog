@@ -95,7 +95,7 @@ def test_buffer_returns_tentative_result_before_window_closes():
     update = buffer.add(_observation(topology, _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down", 0)))
 
     assert update.update_type == BufferUpdateType.TENTATIVE
-    assert update.current_root_cause_object == "BGPSession:Spine1-Leaf1-eBGP"
+    assert update.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
     assert update.result is not None
 
 
@@ -107,10 +107,9 @@ def test_buffer_revises_rca_when_delayed_link_evidence_arrives():
     second = buffer.add(_observation(topology, _msg("Leaf1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", 0)))
     third = buffer.add(_observation(topology, _msg("Spine1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", 1)))
 
-    assert first.current_root_cause_object == "BGPSession:Spine1-Leaf1-eBGP"
-    revised = next(update for update in (second, third) if update.update_type == BufferUpdateType.RCA_REVISED)
-    assert revised.previous_root_cause_object != revised.current_root_cause_object
-    assert revised.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert first.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert second.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert third.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
 
 
 def test_buffer_keeps_event_time_order_separate_from_received_time():
@@ -149,5 +148,5 @@ def test_close_window_returns_final_result_and_clears_buffer():
 
     assert update.update_type == BufferUpdateType.WINDOW_CLOSED
     assert update.result is not None
-    assert update.current_root_cause_object == "BGPSession:Spine1-Leaf1-eBGP"
+    assert update.current_root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
     assert buffer.observations == ()

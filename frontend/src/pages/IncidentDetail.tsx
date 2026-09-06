@@ -121,6 +121,7 @@ export function IncidentDetail() {
   const rca = incident.rca_explanation
   const primaryRca = rca.primary_candidate
   const rcaConfidence = confidenceLabel(rca.confidence)
+  const impactObjects = rca.impact_objects
 
   return (
     <div className="mx-auto max-w-7xl p-4">
@@ -210,6 +211,34 @@ export function IncidentDetail() {
       </div>
 
       {/* 二次影響ノード */}
+      {(incident.parent_incident_id || incident.child_incident_ids.length > 0) && (
+        <div className="mt-4 rounded-lg border bg-white p-3 shadow-sm">
+          <p className="mb-2 text-xs text-gray-400">関連インシデント</p>
+          <div className="space-y-2 text-sm">
+            {incident.parent_incident_id && (
+              <p>
+                <span className="font-medium text-gray-600">親:</span>{' '}
+                <Link to={`/incidents/${incident.parent_incident_id}`} className="text-blue-600 hover:underline">
+                  {incident.parent_incident_id}
+                </Link>
+              </p>
+            )}
+            {incident.child_incident_ids.length > 0 && (
+              <div>
+                <p className="font-medium text-gray-600">子インシデント</p>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {incident.child_incident_ids.map((childId) => (
+                    <Link key={childId} to={`/incidents/${childId}`} className="rounded bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100">
+                      {childId}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {incident.secondary_nodes.length > 0 && (
         <div className="mt-4 rounded-lg border bg-white p-3 shadow-sm">
           <p className="mb-2 text-xs text-gray-400">
@@ -219,6 +248,21 @@ export function IncidentDetail() {
             {incident.secondary_nodes.map((n) => (
               <span key={n} className="rounded bg-yellow-100 px-2 py-0.5 text-sm text-yellow-800">
                 {n}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {impactObjects.length > 0 && (
+        <div className="mt-4 rounded-lg border bg-white p-3 shadow-sm">
+          <p className="mb-2 text-xs text-gray-400">
+            影響オブジェクト ({impactObjects.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {impactObjects.map((objectId) => (
+              <span key={objectId} className="rounded bg-sky-100 px-2 py-0.5 text-sm text-sky-800">
+                {objectId}
               </span>
             ))}
           </div>

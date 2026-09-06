@@ -112,6 +112,7 @@ def test_projector_preserves_score_components_in_rca_explanation():
     assert explanation.primary_candidate.node_id == "Spine1"
     assert {evidence.source for evidence in explanation.primary_candidate.evidences} == {"hypothesis-score"}
     assert any(evidence.summary.startswith("coverage:") for evidence in explanation.primary_candidate.evidences)
+    assert explanation.impact_objects == ["BGPSession:Spine1-Leaf1-eBGP"]
 
 
 def test_projector_emits_revision_event_without_store_integration():

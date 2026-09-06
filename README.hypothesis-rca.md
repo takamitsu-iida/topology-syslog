@@ -20,7 +20,7 @@ Raw SYSLOG
   -> Store / Notification / UI
 ```
 
-この責務分離により、リンク停止、装置停止、インターフェース障害、BGPセッション障害、サイレント障害、復旧イベントを同じ枠組みで扱う。
+この責務分離により、リンク停止、装置停止、インターフェース障害、BGPセッション断、サイレント障害、復旧イベントを同じ枠組みで扱う。BGPセッションは根本原因ではなく、上位の Link / Interface / Device 障害から派生する影響・観測対象として扱う。
 
 ---
 
@@ -31,7 +31,7 @@ Raw SYSLOG
 | 責務 | 現行 | 新方式 |
 |---|---|---|
 | SYSLOG分類 | 受信処理中に分類して即判断 | Observation 作成前の前処理 |
-| トポロジー探索 | Device 中心の祖先・子孫探索 | Device / Interface / PhysicalLink / BGPSession の依存グラフ探索 |
+| トポロジー探索 | Device 中心の祖先・子孫探索 | Device / Interface / PhysicalLink / BGPSession の依存グラフ探索。root cause candidate は Device / Interface / PhysicalLink に限定 |
 | RCA判断 | Incident生成とほぼ同時 | Hypothesis採点として独立 |
 | 既存Incident統合 | 推論直後にマージ | RCAResultからIncident Projectorが判断 |
 | 復旧 | Incident更新処理に直結 | Observationとして扱いLifecycleへ反映 |
@@ -45,14 +45,14 @@ Raw SYSLOG
 
 ### 3.1 Causal Object
 
-根本原因候補になり得る対象を、Device だけでなく明示的なオブジェクトとして扱う。
+根本原因候補になり得る対象を、Device だけでなく明示的なオブジェクトとして扱う。`BGPSession` は依存グラフ上には残すが root cause candidate ではなく、影響 evidence として扱う。
 
 | Object | 例 | 用途 |
 |---|---|---|
 | `Device` | `Device:Spine1` | 装置全体停止、サイレント障害 |
 | `Interface` | `Interface:Leaf1:GigabitEthernet0/0` | 単体IF障害、ローカル断 |
 | `PhysicalLink` | `PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0` | 両端IFやBGP断をまとめる物理リンク障害 |
-| `BGPSession` | `BGPSession:Spine1-Leaf1-eBGP` | BGPのみの論理障害 |
+| `BGPSession` | `BGPSession:Spine1-Leaf1-eBGP` | BGP down の影響・観測対象。上位の Link / Interface / Device 候補の根拠に使う |
 | `Service` | `Service:VRF:tenant-a` | 将来の影響範囲算出 |
 
 ### 3.2 Observation
@@ -95,6 +95,10 @@ RCAResult:
     observations: tuple[Observation, ...]
 ```
 
+`RCAResult` を Incident に投影する際、root cause ではない観測対象は `rca_explanation.impact_objects` として保存する。たとえば BGP session down は `BGPSession:*` impact object として API/UI に表示し、親となる Link / Interface / Device root の根拠として扱う。
+
+親子 Incident は `parent_incident_id` / `child_incident_ids` / `relationship_type` で表現する。root Incident は `relationship_type=root`、BGP session down などの派生事象は `relationship_type=impact` の子 Incident として保存する。通常の `/incidents` は root Incident を中心に返し、子 Incident も含める場合は `include_children=true` を使う。
+
 ---
 
 ## 4. 進捗サマリー
@@ -117,14 +121,14 @@ RCAResult:
 
 ### Phase H0: 最小PoC ✅ 完了
 
-目的: 新方式でリンク停止、装置停止、IF単体障害、BGP単体障害を分離できるか確認する。
+目的: 新方式でリンク停止、装置停止、IF単体障害を root cause として分離し、BGP単体障害を影響 evidence として扱えるか確認する。
 
 実装済み:
 
 - [x] `CausalTopology` を追加
 - [x] `Observation` / `Hypothesis` / `RCAResult` を追加
 - [x] `HypothesisRCAEngine` を追加
-- [x] Device / Interface / PhysicalLink / BGPSession を原因候補化
+- [x] Device / Interface / PhysicalLink を原因候補化し、BGPSession は影響 evidence として扱う
 - [x] 最小スコアリングを実装
 - [x] 既存本番パイプラインには未接続
 
@@ -133,7 +137,7 @@ RCAResult:
 - [x] 単一物理リンク障害では `PhysicalLink` が勝つ
 - [x] Spine配下の複数BGP断では `Device:Spine1` が勝つ
 - [x] Leaf配下IF単体障害では `Interface` に局所化される
-- [x] BGPのみの障害では `BGPSession` に局所化される
+- [x] BGPのみの障害では関連する `PhysicalLink` / `Interface` / `Device` root に寄せ、`BGPSession` は影響 evidence として残す
 
 検証コマンド:
 
@@ -464,7 +468,7 @@ pytest -q src/tests/test_hypothesis_api.py src/tests/test_hypothesis_lifecycle.p
 
 - [x] 実ログサンプルで誤判定率を記録する
 - [x] legacyとhypothesisの差分をレビューする
-- [x] Link / Device / Interface / BGPSessionごとの正答率を確認する
+- [x] Link / Device / Interfaceごとの正答率を確認し、BGPSessionは影響 evidence として評価する
 - [x] 通知対象を hypothesis に切り替える条件を決める
 - [x] legacy inferencer の扱いを縮退または互換モード化する
 
@@ -512,7 +516,7 @@ curl -s http://localhost:8000/debug/rca/migration-readiness \
 - `hypothesis_accuracy >= min_accuracy`
 - `average_hypothesis_confidence >= min_confidence`
 - `hypothesis_accuracy >= legacy_accuracy`
-- `PhysicalLink` / `Device` / `Interface` / `BGPSession` の各カテゴリで、運用上許容できない偏りがない
+- `PhysicalLink` / `Device` / `Interface` の各カテゴリで、運用上許容できない偏りがない
 
 通常起動:
 

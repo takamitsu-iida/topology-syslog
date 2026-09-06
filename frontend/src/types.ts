@@ -17,6 +17,9 @@ export interface Incident {
   flap_count: number
   recovery_evidence: string[]
   rca_explanation: RCAExplanation
+  parent_incident_id: string | null
+  child_incident_ids: string[]
+  relationship_type: 'root' | 'impact' | string
 }
 
 export interface RCAEvidence {
@@ -39,6 +42,7 @@ export interface RCAExplanation {
   confidence: number | null
   primary_candidate: RCACandidate | null
   alternative_candidates: RCACandidate[]
+  impact_objects: string[]
 }
 
 export interface RCAEvaluation {

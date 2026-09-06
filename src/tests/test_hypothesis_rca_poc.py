@@ -132,9 +132,10 @@ def test_poc_leaf_access_interface_fault_stays_local():
     assert result.root_cause_object == "Interface:Leaf1:GigabitEthernet0/2"
 
 
-def test_poc_bgp_only_fault_stays_on_session():
+def test_poc_bgp_only_fault_projects_to_physical_or_device_root():
     result = _engine().infer([
         _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
     ])
 
-    assert result.root_cause_object == "BGPSession:Spine1-Leaf1-eBGP"
+    assert result.root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert all(not hypothesis.root_cause_object.startswith("BGPSession:") for hypothesis in result.hypotheses)

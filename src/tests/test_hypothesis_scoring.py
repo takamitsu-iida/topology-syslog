@@ -138,13 +138,16 @@ def test_scorer_keeps_single_interface_fault_local():
     assert HypothesisScorer(topology).score(observations)[0].root_cause_object == "Interface:Leaf1:GigabitEthernet0/0"
 
 
-def test_scorer_keeps_single_bgp_fault_on_session():
+def test_scorer_uses_single_bgp_fault_as_link_impact_evidence():
     topology = _topology()
     observations = _observations(topology, [
         _msg("Leaf1", "%BGP-5-ADJCHANGE: neighbor Spine1 down"),
     ])
 
-    assert HypothesisScorer(topology).score(observations)[0].root_cause_object == "BGPSession:Spine1-Leaf1-eBGP"
+    hypotheses = HypothesisScorer(topology).score(observations)
+
+    assert hypotheses[0].root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert all(not hypothesis.root_cause_object.startswith("BGPSession:") for hypothesis in hypotheses)
 
 
 def test_scorer_tie_breaker_is_deterministic_for_equal_interface_faults():

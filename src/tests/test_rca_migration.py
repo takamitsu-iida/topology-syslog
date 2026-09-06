@@ -19,14 +19,14 @@ def test_migration_readiness_recommends_hypothesis_when_criteria_are_met():
     readiness = evaluate_migration_readiness([
         _sample("link", "PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0", "PhysicalLink:Leaf1:Gi0/0--Spine1:Gi0/0"),
         _sample("device", "Device:Spine1", "Device:Spine1"),
-        _sample("session", "BGPSession:Spine1-Leaf1-eBGP", "BGPSession:Spine1-Leaf1-eBGP"),
+        _sample("interface", "Interface:Leaf1:GigabitEthernet0/0", "Interface:Leaf1:GigabitEthernet0/0"),
     ], min_accuracy=0.8, min_confidence=0.6)
 
     assert readiness.ready is True
     assert readiness.recommended_engine == "hypothesis"
     assert readiness.rollback_engine == "legacy"
     assert readiness.hypothesis_accuracy == 1.0
-    assert readiness.object_type_accuracy == {"PhysicalLink": 1.0, "Device": 1.0, "BGPSession": 1.0}
+    assert readiness.object_type_accuracy == {"PhysicalLink": 1.0, "Device": 1.0, "Interface": 1.0}
 
 
 def test_migration_readiness_keeps_dual_when_hypothesis_is_below_threshold():

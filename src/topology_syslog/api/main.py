@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -107,6 +108,17 @@ def _find_matching_hypothesis_incident(open_incidents, root_object: str, lifecyc
     return None
 
 
+def _root_object_priority(root_object: str | None) -> int:
+    if root_object is None:
+        return 0
+    root_type = root_object.split(":", 1)[0]
+    return {
+        "Device": 1,
+        "Interface": 2,
+        "PhysicalLink": 3,
+    }.get(root_type, 0)
+
+
 def _merge_projected_hypothesis_incident(existing, projected, observation, lifecycle: HypothesisIncidentLifecycle):
     existing_root = _incident_root_cause_object(existing)
     projected_root = projected.root_cause_object or _incident_root_cause_object(projected)
@@ -114,13 +126,18 @@ def _merge_projected_hypothesis_incident(existing, projected, observation, lifec
         existing_root is not None
         and projected_root is not None
         and lifecycle.is_causal_ancestor(existing_root, projected_root)
+        and existing_root != projected_root
+        and _root_object_priority(existing_root) >= _root_object_priority(projected_root)
     )
     projected.incident_id = existing.incident_id
     projected.created_at = existing.created_at
     projected.recurrence_count = existing.recurrence_count
-    projected.raw_logs = [*existing.raw_logs, *projected.raw_logs]
-    projected.raw_log_count = existing.raw_log_count + projected.raw_log_count
-    projected.secondary_nodes = list(dict.fromkeys([*existing.secondary_nodes, *projected.secondary_nodes]))
+    projected.raw_logs = list(dict.fromkeys([*existing.raw_logs, *projected.raw_logs]))
+    projected.raw_log_count = len(projected.raw_logs)
+    projected.secondary_nodes = [
+        node for node in dict.fromkeys([*existing.secondary_nodes, *projected.secondary_nodes])
+        if node != projected.root_cause_node
+    ]
     projected.recovery_evidence = existing.recovery_evidence
     projected.flap_count = existing.flap_count
     projected.flap_history = existing.flap_history
@@ -134,6 +151,41 @@ def _merge_projected_hypothesis_incident(existing, projected, observation, lifec
         projected.rca_explanation = existing.rca_explanation
     event = lifecycle.apply_fault(projected, observation)
     return event.incident if event.incident is not None else projected
+
+
+def _child_incident_from_impact(parent, projected, impact_object: str):
+    child = deepcopy(projected)
+    child.incident_id = f"{parent.incident_id}-CH{len(parent.child_incident_ids) + 1:03d}"
+    child.parent_incident_id = parent.incident_id
+    child.child_incident_ids = []
+    child.relationship_type = "impact"
+    child.root_cause_object = impact_object
+    child.rca_explanation.impact_objects = []
+    child.secondary_nodes = [
+        node for node in dict.fromkeys(child.secondary_nodes)
+        if node != child.root_cause_node
+    ]
+    return child
+
+
+async def _persist_impact_children(app: FastAPI, parent, projected) -> None:
+    impact_objects = projected.rca_explanation.impact_objects
+    for impact_object in impact_objects:
+        if not impact_object.startswith("BGPSession:"):
+            continue
+        existing_child = await asyncio.to_thread(
+            app.state.store.find_child_incident,
+            parent.incident_id,
+            impact_object,
+        )
+        if existing_child is not None:
+            continue
+        child = _child_incident_from_impact(parent, projected, impact_object)
+        if child.incident_id in parent.child_incident_ids:
+            continue
+        await asyncio.to_thread(app.state.store.save, child)
+        parent.child_incident_ids = [*parent.child_incident_ids, child.incident_id]
+        await asyncio.to_thread(app.state.store.update, parent)
 
 
 def _compare_rca_engines(app: FastAPI, messages: list) -> dict:
@@ -427,6 +479,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
         if existing is not None:
             incident = _merge_projected_hypothesis_incident(existing, incident, observation, lifecycle)
             if await asyncio.to_thread(app.state.store.update, incident):
+                await _persist_impact_children(app, incident, projected.incident)
                 await asyncio.to_thread(
                     app.state.store.record_rca_evaluation,
                     incident.incident_id,
@@ -451,6 +504,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     if matching_open is not None:
         incident = _merge_projected_hypothesis_incident(matching_open, incident, observation, lifecycle)
         if await asyncio.to_thread(app.state.store.update, incident):
+            await _persist_impact_children(app, incident, projected.incident)
             app.state.hypothesis_active_incident_id = incident.incident_id
             app.state.hypothesis_active_root_object = update.current_root_cause_object
             event = NotificationEvent.FLAPPING if incident.condition == "FLAPPING" else NotificationEvent.UPDATED
@@ -471,6 +525,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     )
     lifecycle.apply_fault(incident, observation)
     await asyncio.to_thread(app.state.store.save, incident)
+    await _persist_impact_children(app, incident, projected.incident)
     app.state.hypothesis_active_incident_id = incident.incident_id
     app.state.hypothesis_active_root_object = update.current_root_cause_object
     if app.state.vigil_notifier is not None:
