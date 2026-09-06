@@ -197,6 +197,9 @@ def main() -> None:
     correlation_mode = os.getenv("CORRELATION_MODE", "immediate").lower()
     if correlation_mode not in {"immediate", "time_window"}:
         raise ValueError("CORRELATION_MODE must be one of: immediate, time_window")
+    rca_engine = os.getenv("RCA_ENGINE", "hypothesis").lower()
+    if rca_engine not in {"legacy", "hypothesis", "dual"}:
+        raise ValueError("RCA_ENGINE must be one of: legacy, hypothesis, dual")
 
     if args.ingest is not None:
         _run_ingest(args)

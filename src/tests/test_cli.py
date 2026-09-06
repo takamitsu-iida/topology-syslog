@@ -4,10 +4,11 @@ import asyncio
 import argparse
 import os
 import sys
+import types
 
 import yaml
 
-from topology_syslog.__main__ import _run_ingest
+from topology_syslog.__main__ import _run_ingest, main
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.file_ingest import run_stream
 from topology_syslog.topology.graph_engine import GraphEngine
@@ -40,9 +41,36 @@ def _args(topology: str, ingest: str) -> argparse.Namespace:
 def _clear_ingest_environment(monkeypatch) -> None:
     for key in (
         "CORRELATION_MODE", "DATABASE_URL", "MAINTENANCE_DIR",
-        "SYSLOG_IGNORE_FILE", "VIGIL_URL", "VIGIL_TEAM",
+        "RCA_ENGINE", "SYSLOG_IGNORE_FILE", "VIGIL_URL", "VIGIL_TEAM",
     ):
         monkeypatch.delenv(key, raising=False)
+
+
+def test_api_server_startup_passes_rca_engine(monkeypatch):
+    _clear_ingest_environment(monkeypatch)
+    monkeypatch.setenv("RCA_ENGINE", "dual")
+    monkeypatch.setattr(sys, "argv", ["topology-syslog"])
+
+    app = object()
+    create_app_calls = []
+    uvicorn_run_calls = []
+
+    def fake_create_app(**kwargs):
+        create_app_calls.append(kwargs)
+        return app
+
+    def fake_uvicorn_run(run_app, **kwargs):
+        uvicorn_run_calls.append((run_app, kwargs))
+
+    import topology_syslog.api.main as api_main
+
+    monkeypatch.setattr(api_main, "create_app", fake_create_app)
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=fake_uvicorn_run))
+
+    main()
+
+    assert create_app_calls[0]["rca_engine"] == "dual"
+    assert uvicorn_run_calls[0][0] is app
 
 
 def test_cli_ingest_with_vigil_url_sends_notification(tmp_path, monkeypatch, capsys):
