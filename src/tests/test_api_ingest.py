@@ -371,6 +371,31 @@ def test_ingest_uses_immediate_pipeline_for_recovery(client, app):
     assert incident.condition == "RECOVERING"
 
 
+def test_ingest_does_not_merge_with_recovered_incident(client, app):
+    recovered = Incident(
+        incident_id="INC-RECOVERED-001",
+        created_at=datetime(2026, 8, 16, 9, 0, 0, tzinfo=timezone.utc),
+        root_cause_node="Core-Router1",
+        primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
+        secondary_nodes=["Dist-Switch1"],
+        raw_log_count=1,
+        raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
+        status="OPEN",
+        condition="RECOVERED",
+        last_fault_at=datetime(2026, 8, 16, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    app.state.store.save(recovered)
+
+    response = client.post("/ingest", json={"messages": [{
+        "source_ip": "192.168.1.1",
+        "raw": "<34>Aug 16 09:00:30 Core-Router1 %LINK-3-UPDOWN: Interface GE0/0 down",
+    }]})
+
+    assert response.status_code == 200
+    assert response.json()[0]["incident_id"] != recovered.incident_id
+    assert app.state.store.count() == 2
+
+
 def test_udp_and_ingest_produce_equivalent_incident_state(poc_topology_file):
     udp_app = create_app(
         database_url="sqlite:///:memory:", topology_path=poc_topology_file,

@@ -334,7 +334,7 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
     if not incidents:
         return []
 
-    open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
+    open_incidents = await asyncio.to_thread(app.state.store.list_open_active)
     affected_incidents = []
     for inc in incidents:
         inc = app.state.lifecycle.apply_fault(
@@ -497,7 +497,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
                 return [incident]
 
     matching_open = _find_matching_hypothesis_incident(
-        await asyncio.to_thread(app.state.store.list_open_lifecycle),
+        await asyncio.to_thread(app.state.store.list_open_active),
         update.current_root_cause_object,
         lifecycle,
     )
