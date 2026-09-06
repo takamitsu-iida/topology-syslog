@@ -21,6 +21,10 @@ class MergeDecision:
     target: Incident | None = None
 
 
+def _root_key(incident: Incident) -> str:
+    return incident.root_cause_object or incident.root_cause_node
+
+
 class IncidentMerger:
     def __init__(self, merge_window_sec: float = 120.0) -> None:
         if merge_window_sec < 0:
@@ -39,7 +43,7 @@ class IncidentMerger:
         ]
 
         for existing in eligible:
-            if existing.root_cause_node == candidate.root_cause_node:
+            if _root_key(existing) == _root_key(candidate):
                 return MergeDecision(MergeAction.APPEND, existing)
 
         for existing in eligible:

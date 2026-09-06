@@ -58,7 +58,7 @@ export function IncidentCard({ incident, onResolve }: Props) {
 
       <p className="mt-1 text-sm text-gray-700">
         <span className="font-medium">根本原因:</span>{' '}
-        <span className="text-red-600 font-medium">{incident.root_cause_node}</span>
+        <span className="text-red-600 font-medium">{incident.root_cause_object ?? incident.root_cause_node}</span>
       </p>
       <p className="mt-0.5 truncate text-sm text-gray-600">
         <span className="font-medium">イベント:</span> {incident.primary_event}

@@ -47,6 +47,7 @@ def test_save_and_get_by_id():
     assert result is not None
     assert result.incident_id == inc.incident_id
     assert result.root_cause_node == "Core-Router1"
+    assert result.root_cause_object is None
     assert result.secondary_nodes == ["Dist-Switch1", "Access-SW1"]
     assert result.status == "OPEN"
 
@@ -161,6 +162,18 @@ def test_update_existing_incident_without_creating_new_row():
     assert updated.raw_logs == ["raw-1", "raw-2", "raw-3", "raw-4"]
     assert updated.condition == "FLAPPING"
     assert store.count() == 1
+
+
+def test_save_and_get_preserves_root_cause_object():
+    store = _store()
+    inc = _inc()
+    inc.root_cause_object = "PhysicalLink:Leaf1:GE0/0--Spine1:GE0/0"
+    store.save(inc)
+
+    result = store.get_by_id(inc.incident_id)
+
+    assert result is not None
+    assert result.root_cause_object == "PhysicalLink:Leaf1:GE0/0--Spine1:GE0/0"
 
 
 def test_update_missing_incident_returns_false():

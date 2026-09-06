@@ -4,6 +4,7 @@ export interface Incident {
   incident_id: string
   created_at: string
   root_cause_node: string
+  root_cause_object: string | null
   primary_event: string
   secondary_nodes: string[]
   raw_log_count: number

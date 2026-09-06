@@ -158,8 +158,8 @@ export function IncidentDetail() {
       {/* 概要カード */}
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs text-gray-400">根本原因ノード</p>
-          <p className="mt-0.5 font-semibold text-red-600">{incident.root_cause_node}</p>
+          <p className="text-xs text-gray-400">根本原因</p>
+          <p className="mt-0.5 font-semibold text-red-600">{incident.root_cause_object ?? incident.root_cause_node}</p>
         </div>
         <div className="rounded-lg border bg-white p-3 shadow-sm">
           <p className="text-xs text-gray-400">発生時刻</p>

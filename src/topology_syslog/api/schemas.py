@@ -51,6 +51,7 @@ class IncidentOut(BaseModel):
     created_at: datetime
     root_cause_node: str
     primary_event: str
+    root_cause_object: str | None = None
     secondary_nodes: list[str]
     raw_log_count: int
     raw_logs: list[str]

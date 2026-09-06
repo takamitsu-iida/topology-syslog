@@ -83,6 +83,8 @@ def _can_create_inferred_incident(incident, classification_result, *, enforce: b
 
 
 def _incident_root_cause_object(incident) -> str | None:
+    if incident.root_cause_object:
+        return incident.root_cause_object
     candidate = incident.rca_explanation.primary_candidate
     if candidate is None:
         return None
@@ -286,7 +288,12 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
                     plan.plan_id, plan.title,
                 )
 
-        inc.recurrence_count = await asyncio.to_thread(app.state.store.count_by_root_cause, inc.root_cause_node)
+        count_method = (
+            app.state.store.count_by_root_cause_object
+            if inc.root_cause_object
+            else app.state.store.count_by_root_cause
+        )
+        inc.recurrence_count = await asyncio.to_thread(count_method, inc.root_cause_object or inc.root_cause_node)
         decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
 
         if decision.action == MergeAction.NEW:
@@ -443,7 +450,14 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
             })
             return [incident]
 
-    incident.recurrence_count = await asyncio.to_thread(app.state.store.count_by_root_cause, incident.root_cause_node)
+    count_method = (
+        app.state.store.count_by_root_cause_object
+        if incident.root_cause_object
+        else app.state.store.count_by_root_cause
+    )
+    incident.recurrence_count = await asyncio.to_thread(
+        count_method, incident.root_cause_object or incident.root_cause_node
+    )
     lifecycle.apply_fault(incident, observation)
     await asyncio.to_thread(app.state.store.save, incident)
     app.state.hypothesis_active_incident_id = incident.incident_id

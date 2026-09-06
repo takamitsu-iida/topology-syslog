@@ -155,3 +155,4 @@ class Incident:
     recovery_evidence: list[str] = field(default_factory=list)
     flap_history: list[dict[str, object]] = field(default_factory=list)
     rca_explanation: RCAExplanation = field(default_factory=RCAExplanation)
+    root_cause_object: str | None = None

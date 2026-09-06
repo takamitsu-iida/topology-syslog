@@ -211,7 +211,8 @@ score component は `rca_explanation` に保存され、API/UI/AI レポート�
 
 | Incident field | 生成元 |
 |---|---|
-| `root_cause_node` | `root_cause_object` の代表 Device |
+| `root_cause_object` | Hypothesis が選択した根本原因オブジェクト（PhysicalLink / Device / Interface / BGPSession） |
+| `root_cause_node` | 互換用の代表 Device。リンク障害では表示上の補助情報 |
 | `primary_event` | 最初の Observation raw message |
 | `secondary_nodes` | root 以外の発報元 node |
 | `raw_logs` | Observation の raw message |

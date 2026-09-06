@@ -26,6 +26,7 @@ class _IncidentRow(_Base):
     created_at        = Column(DateTime, nullable=False)  # UTC tz-naive で保存
     root_cause        = Column(String,   nullable=False)
     primary_event     = Column(Text,     nullable=False)
+    root_cause_object = Column(String,   nullable=True)
     secondary_nodes   = Column(JSON,     nullable=False)
     raw_log_count     = Column(Integer,  nullable=False)
     raw_logs          = Column(JSON,     nullable=False, server_default="[]")
@@ -66,6 +67,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         created_at=inc.created_at.replace(tzinfo=None),  # tz を剥がして保存
         root_cause=inc.root_cause_node,
         primary_event=inc.primary_event,
+        root_cause_object=inc.root_cause_object,
         secondary_nodes=inc.secondary_nodes,
         raw_log_count=inc.raw_log_count,
         raw_logs=inc.raw_logs[:_RAW_LOGS_CAP],
@@ -88,6 +90,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         created_at=row.created_at.replace(tzinfo=timezone.utc),
         root_cause_node=row.root_cause,
         primary_event=row.primary_event,
+        root_cause_object=row.root_cause_object,
         secondary_nodes=list(row.secondary_nodes or []),
         raw_log_count=row.raw_log_count,
         raw_logs=list(row.raw_logs or []),
@@ -115,6 +118,7 @@ class IncidentStore:
         with self._engine.connect() as conn:
             for ddl in [
                 "ALTER TABLE incidents ADD COLUMN raw_logs JSON",
+                "ALTER TABLE incidents ADD COLUMN root_cause_object TEXT",
                 "ALTER TABLE incidents ADD COLUMN recurrence_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE incidents ADD COLUMN condition TEXT NOT NULL DEFAULT 'ACTIVE'",
                 "ALTER TABLE incidents ADD COLUMN maintenance_plan_id TEXT",
@@ -145,6 +149,7 @@ class IncidentStore:
             row.created_at = incident.created_at.replace(tzinfo=None)
             row.root_cause = incident.root_cause_node
             row.primary_event = incident.primary_event
+            row.root_cause_object = incident.root_cause_object
             row.secondary_nodes = incident.secondary_nodes
             row.raw_log_count = incident.raw_log_count
             row.raw_logs = incident.raw_logs[:_RAW_LOGS_CAP]
@@ -287,6 +292,15 @@ class IncidentStore:
             return (
                 session.query(_IncidentRow)
                 .filter(_IncidentRow.root_cause == root_cause_node)
+                .filter(_IncidentRow.status == "OPEN")
+                .count()
+            )
+
+    def count_by_root_cause_object(self, root_cause_object: str) -> int:
+        with Session(self._engine) as session:
+            return (
+                session.query(_IncidentRow)
+                .filter(_IncidentRow.root_cause_object == root_cause_object)
                 .filter(_IncidentRow.status == "OPEN")
                 .count()
             )

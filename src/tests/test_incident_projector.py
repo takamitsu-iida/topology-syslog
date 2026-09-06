@@ -74,6 +74,7 @@ def test_projector_creates_legacy_incident_from_rca_result():
     assert event.event_type == ProjectionEventType.INCIDENT_CANDIDATE
     assert isinstance(event.incident, Incident)
     assert event.root_cause_object == "PhysicalLink:Leaf1:GigabitEthernet0/0--Spine1:GigabitEthernet0/0"
+    assert event.incident.root_cause_object == event.root_cause_object
     assert event.incident.root_cause_node == "Spine1"
     assert event.incident.incident_id == "INC-20260905-001"
     assert event.incident.created_at == BASE

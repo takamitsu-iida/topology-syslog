@@ -44,6 +44,7 @@ class IncidentProjector:
             created_at=created_at,
             root_cause_node=self._root_cause_node(result.root_cause_object),
             primary_event=_primary_event(result),
+            root_cause_object=result.root_cause_object,
             secondary_nodes=self._secondary_nodes(result),
             raw_log_count=len(result.observations),
             raw_logs=[observation.raw_message for observation in result.observations],
@@ -84,7 +85,7 @@ class IncidentProjector:
                 source="hypothesis-score",
                 summary=f"{component.name}: {component.detail}",
                 weight=component.value,
-                related_nodes=[root_node],
+                related_nodes=[result.root_cause_object],
                 related_log_ids=[result.root_cause_object],
             )
             for component in best.score_components
