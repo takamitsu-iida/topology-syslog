@@ -140,6 +140,18 @@ def test_resolve_incident_not_found(client):
     assert resp.status_code == 404
 
 
+def test_reopen_incident(client, app):
+    app.state.store.save(_make_inc(status="CLOSED"))
+    resp = client.put("/incidents/INC-20260816-001/reopen")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "OPEN"
+
+
+def test_reopen_incident_not_found(client):
+    resp = client.put("/incidents/INC-99991231-999/reopen")
+    assert resp.status_code == 404
+
+
 def test_purge_closed_incidents_requires_confirm_and_preserves_open(client, app):
     app.state.store.save(_make_inc("INC-CLOSED", status="CLOSED"))
     app.state.store.save(_make_inc("INC-OPEN", status="OPEN"))

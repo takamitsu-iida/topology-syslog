@@ -252,6 +252,16 @@ class IncidentStore:
             session.commit()
             return True
 
+    def reopen(self, incident_id: str) -> bool:
+        """オペレーターによるインシデントの再オープン（status = OPEN）。"""
+        with Session(self._engine) as session:
+            row = session.get(_IncidentRow, incident_id)
+            if row is None:
+                return False
+            row.status = "OPEN"
+            session.commit()
+            return True
+
     def recover_by_root_cause(self, root_cause_node: str) -> list[str]:
         """復旧イベント到着時に、指定根本原因ノードのOPENインシデントのconditionをRECOVEREDに更新してIDリストを返す。"""
         with Session(self._engine) as session:

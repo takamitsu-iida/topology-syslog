@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { generateAiReport, getIncident, getInvestigation, getRcaHistory, getSimilarIncidents, getTopologyGraph, startInvestigation } from '../api/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { generateAiReport, getIncident, getInvestigation, getRcaHistory, getSimilarIncidents, getTopologyGraph, reopenIncident, resolveIncident, startInvestigation } from '../api/client'
 import { TopologyMap } from '../components/TopologyMap'
 
 function formatDateTime(value: string | null) {
@@ -44,6 +44,7 @@ function scoreEvidenceValue(evidence: { source: string; summary: string; weight:
 
 export function IncidentDetail() {
   const { id } = useParams<{ id: string }>()
+  const queryClient = useQueryClient()
 
   const { data: incident, isLoading } = useQuery({
     queryKey: ['incident', id],
@@ -67,6 +68,16 @@ export function IncidentDetail() {
     queryKey: ['rca-history', id],
     queryFn: () => getRcaHistory(id!),
     enabled: !!id,
+  })
+
+  const resolve = useMutation({
+    mutationFn: () => resolveIncident(id!),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['incident', id] }),
+  })
+
+  const reopen = useMutation({
+    mutationFn: () => reopenIncident(id!),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['incident', id] }),
   })
 
   const [aiReport, setAiReport] = useState<string | null>(null)
@@ -117,12 +128,32 @@ export function IncidentDetail() {
         ← インシデント一覧
       </Link>
 
-      <div className="mt-2 flex items-center gap-3">
+      <div className="mt-2 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold text-gray-800">{incident.incident_id}</h1>
         <span className={`rounded-full px-3 py-0.5 text-sm font-medium ${stateBadge.cls}`}>
           {stateBadge.label}
         </span>
+        {incident.status === 'OPEN' && (
+          <button
+            onClick={() => resolve.mutate()}
+            disabled={resolve.isPending}
+            className="rounded border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+          >
+            {resolve.isPending ? '処理中…' : '解決済みにする'}
+          </button>
+        )}
+        {(incident.status === 'CLOSED' || incident.status === 'RESOLVED') && (
+          <button
+            onClick={() => reopen.mutate()}
+            disabled={reopen.isPending}
+            className="rounded border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+          >
+            {reopen.isPending ? '処理中…' : '未解決に戻す'}
+          </button>
+        )}
       </div>
+      {resolve.isError && <p className="mt-2 text-sm text-red-500">解決処理に失敗しました</p>}
+      {reopen.isError && <p className="mt-2 text-sm text-red-500">再オープン処理に失敗しました</p>}
 
       {/* 概要カード */}
       <div className="mt-4 grid grid-cols-2 gap-3">

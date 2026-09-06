@@ -55,6 +55,9 @@ export const getRcaHistory = (id: string): Promise<RCAHistoryResponse> =>
 export const resolveIncident = (id: string): Promise<Incident> =>
   put<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`)
 
+export const reopenIncident = (id: string): Promise<Incident> =>
+  put<Incident>(`/incidents/${encodeURIComponent(id)}/reopen`)
+
 export const previewClosedIncidentPurge = (before: string): Promise<{ count: number }> =>
   deleteRequest<{ count: number }>(`/incidents?before=${encodeURIComponent(before)}`)
 

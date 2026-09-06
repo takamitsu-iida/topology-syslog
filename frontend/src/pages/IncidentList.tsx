@@ -6,8 +6,6 @@ import { useIncidentWebSocket } from '../hooks/useWebSocket'
 
 const STATUS_FILTERS = [
   { label: 'OPEN',      value: 'OPEN' as const },
-  { label: 'FLAPPING', value: 'FLAPPING' as const },
-  { label: 'RESOLVED', value: 'RESOLVED' as const },
   { label: '全て',     value: undefined },
 ]
 

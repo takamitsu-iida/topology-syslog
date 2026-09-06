@@ -74,6 +74,16 @@ def resolve_incident(
     return IncidentOut.model_validate(inc)
 
 
+@router.put("/incidents/{incident_id}/reopen", response_model=IncidentOut)
+def reopen_incident(
+    incident_id: str,
+    store: IncidentStore = Depends(_get_store),
+) -> IncidentOut:
+    if not store.reopen(incident_id):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return IncidentOut.model_validate(store.get_by_id(incident_id))
+
+
 @router.delete("/incidents", response_model=dict[str, int])
 def purge_closed_incidents(
     before: datetime,
