@@ -19,7 +19,6 @@ def _inc(
     created_at: datetime | None = None,
     last_fault_at: datetime | None = None,
     last_recovery_at: datetime | None = None,
-    flap_count: int = 0,
     recovery_evidence: list[str] | None = None,
 ) -> Incident:
     return Incident(
@@ -34,7 +33,6 @@ def _inc(
         condition=condition,
         last_fault_at=last_fault_at,
         last_recovery_at=last_recovery_at,
-        flap_count=flap_count,
         recovery_evidence=recovery_evidence or [],
     )
 
@@ -160,7 +158,6 @@ def test_update_existing_incident_without_creating_new_row():
     inc.secondary_nodes = ["Core-Router1", "Dist-Switch1"]
     inc.raw_log_count = 4
     inc.raw_logs = ["raw-1", "raw-2", "raw-3", "raw-4"]
-    inc.condition = "FLAPPING"
 
     assert store.update(inc) is True
     updated = store.get_by_id(inc.incident_id)
@@ -169,7 +166,7 @@ def test_update_existing_incident_without_creating_new_row():
     assert updated.secondary_nodes == ["Core-Router1", "Dist-Switch1"]
     assert updated.raw_log_count == 4
     assert updated.raw_logs == ["raw-1", "raw-2", "raw-3", "raw-4"]
-    assert updated.condition == "FLAPPING"
+    assert updated.condition == "ACTIVE"
     assert store.count() == 1
 
 
@@ -220,12 +217,11 @@ def test_update_missing_incident_returns_false():
 def test_list_open_active_returns_merge_candidates_only():
     store = _store()
     store.save(_inc("INC-ACTIVE", condition="ACTIVE", created_at=datetime(2026, 8, 16, 12, 0, 0, tzinfo=timezone.utc)))
-    store.save(_inc("INC-FLAPPING", condition="FLAPPING", created_at=datetime(2026, 8, 16, 13, 0, 0, tzinfo=timezone.utc)))
     store.save(_inc("INC-RECOVERED", condition="RECOVERED"))
     store.save(_inc("INC-CLOSED", status="CLOSED", condition="ACTIVE"))
 
     results = store.list_open_active()
-    assert [inc.incident_id for inc in results] == ["INC-FLAPPING", "INC-ACTIVE"]
+    assert [inc.incident_id for inc in results] == ["INC-ACTIVE"]
 
 
 def test_list_open_lifecycle_returns_recovery_candidates():
@@ -249,7 +245,6 @@ def test_incident_lifecycle_fields_are_persisted():
         condition="RECOVERING",
         last_fault_at=last_fault_at,
         last_recovery_at=last_recovery_at,
-        flap_count=2,
         recovery_evidence=["%LINK-3-UPDOWN: Interface GE0/0 up"],
     ))
 
@@ -259,7 +254,6 @@ def test_incident_lifecycle_fields_are_persisted():
     assert result.condition == "RECOVERING"
     assert result.last_fault_at == last_fault_at
     assert result.last_recovery_at == last_recovery_at
-    assert result.flap_count == 2
     assert result.recovery_evidence == ["%LINK-3-UPDOWN: Interface GE0/0 up"]
 
 
@@ -270,7 +264,6 @@ def test_update_persists_incident_lifecycle_fields():
     incident.condition = "DEGRADED"
     incident.last_fault_at = datetime(2026, 8, 16, 10, 8, 0, tzinfo=timezone.utc)
     incident.last_recovery_at = datetime(2026, 8, 16, 10, 9, 0, tzinfo=timezone.utc)
-    incident.flap_count = 3
     incident.recovery_evidence = ["BGP neighbor established"]
 
     assert store.update(incident) is True
@@ -280,7 +273,6 @@ def test_update_persists_incident_lifecycle_fields():
     assert updated.condition == "DEGRADED"
     assert updated.last_fault_at == incident.last_fault_at
     assert updated.last_recovery_at == incident.last_recovery_at
-    assert updated.flap_count == 3
     assert updated.recovery_evidence == ["BGP neighbor established"]
 
 

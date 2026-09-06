@@ -127,14 +127,3 @@ def test_vigil_recovered_lifecycle_resolves_by_source():
 
     assert mock_post.call_args.args[0] == "http://vigil.test/api/v1/incidents/resolve-by-source"
     assert mock_post.call_args.kwargs["json"] == {"source": "Core-Router1"}
-
-
-def test_vigil_flapping_lifecycle_uses_p2_priority():
-    incident = _inc()
-    incident.condition = "FLAPPING"
-    with patch("httpx.post", return_value=_mock_ok_response()) as mock_post:
-        VigilNotifier("http://vigil.test", team_name="netops").send_lifecycle(incident, NotificationEvent.FLAPPING)
-
-    payload = mock_post.call_args.kwargs["json"]
-    assert payload["priority"] == "P2"
-    assert payload["title"].startswith("[FLAPPING]")

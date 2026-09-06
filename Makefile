@@ -6,12 +6,10 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 # ── 設定（環境変数で上書き可） ─────────────────────────────────────────────
 TOPOLOGY_PATH   ?= configs/clos/yang_topology.yaml
 TOPOLOGY_SOURCE ?= iida-yaml
-IGNORE_FILE     ?= configs/syslog_ignore.txt
 API_HOST        ?= 0.0.0.0
 API_PORT        ?= 8080
 SYSLOG_HOST     ?= 0.0.0.0
 SYSLOG_PORT     ?= 1514
-RCA_ENGINE      ?= hypothesis
 NODE_MONITOR_HOST ?= 0.0.0.0
 NODE_MONITOR_PORT ?= 8090
 NODE_MONITOR_URL  ?= http://127.0.0.1:$(NODE_MONITOR_PORT)
@@ -76,12 +74,10 @@ start-api: | $(PID_DIR) $(LOG_DIR)
 	else \
 		TOPOLOGY_PATH=$(TOPOLOGY_PATH) \
 		TOPOLOGY_SOURCE=$(TOPOLOGY_SOURCE) \
-		SYSLOG_IGNORE_FILE=$(IGNORE_FILE) \
 		API_HOST=$(API_HOST) \
 		API_PORT=$(API_PORT) \
 		SYSLOG_HOST=$(SYSLOG_HOST) \
 		SYSLOG_PORT=$(SYSLOG_PORT) \
-		RCA_ENGINE=$(RCA_ENGINE) \
 		NODE_MONITOR_URL=$(NODE_MONITOR_URL) \
 		uv run $(ENV_FILE_ARG) python -m topology_syslog >"$(CURDIR)/$(API_LOG)" 2>&1 & echo $$! >"$(CURDIR)/$(API_PID)"; \
 		echo "API started (PID $$(cat $(API_PID))) — log: $(API_LOG)"; \

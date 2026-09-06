@@ -1,11 +1,9 @@
 import asyncio
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import _process_message_immediately, create_app
-from topology_syslog.config import load_config
 from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate, SyslogMessage
 
 
@@ -211,30 +209,6 @@ def test_process_message_immediately_merges_into_open_incident(app):
         assert incidents[0].incident_id == "INC-20260816-001"
         assert incidents[0].root_cause_node == "Core-Router1"
         assert incidents[0].raw_log_count >= 2
-
-
-def test_create_app_accepts_time_window_compatibility_mode(tmp_path):
-    cfg_path = tmp_path / "topology.yaml"
-    cfg_path.write_text("topology:\n  path: configs/clos/yang_topology.yaml\n", encoding="utf-8")
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path=str(cfg_path),
-        topology_source="iida-yaml",
-        correlation_mode="time_window",
-        window_sec=10,
-    )
-    assert app is not None
-    assert app.state is not None
-
-
-def test_load_config_warns_on_legacy_window_settings(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "correlation:\n  window_sec: 30\n",
-        encoding="utf-8",
-    )
-    with pytest.warns(DeprecationWarning, match="Legacy correlation window settings"):
-        load_config(str(cfg_path))
 
 
 # ---- /topology/nodes ---------------------------------------------------

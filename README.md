@@ -2,7 +2,7 @@
 
 **Topology-aware SYSLOG RCA server** - ネットワークトポロジーを事前ロードし、多数の SYSLOG から根本原因候補を推定してインシデントを生成する監視プラットフォームです。
 
-現在の標準エンジンは **Hypothesis-Based RCA** です。`make start`、Docker Compose、通常の `/ingest` は新方式で動作します。旧方式は `RCA_ENGINE=legacy` を明示した場合の rollback 用としてのみ残しています。
+RCA は **Hypothesis-Based RCA** で動作します。`make start`、Docker Compose、通常の `/ingest` は同じ新方式のパイプラインを使用します。
 
 ---
 
@@ -38,7 +38,7 @@ Raw SYSLOG
 | SYSLOG Knowledge Base | SKB と Severity policy により `fault-signal` / `state-change` / `recovery` / `retain-only` へ分類 |
 | Observation Buffer | event time ベースの短時間 window で遅延到着ログを扱い、RCA 改訂を可能にする |
 | Incident Projection | `RCAResult` を既存 `Incident` モデルへ投影し、root cause、影響オブジェクト、親子 Incident 関係を API/UI/通知へ接続 |
-| 復旧 Lifecycle | recovery Observation により `RECOVERING` / `RECOVERED` / `FLAPPING` を更新 |
+| 復旧 Lifecycle | recovery Observation により `RECOVERING` / `RECOVERED` を更新 |
 | 比較・移行 API | legacy / hypothesis の差分確認、ラベル付きサンプルによる移行評価 |
 | Web UI | React + Cytoscape.js によるインシデント、トポロジー、RCA 根拠表示 |
 | AI 障害レポート | OpenAI / Ollama による RCA 根拠付き障害レポート生成 |
@@ -69,7 +69,6 @@ make start
 ```text
 TOPOLOGY_PATH=configs/clos/yang_topology.yaml
 TOPOLOGY_SOURCE=iida-yaml
-RCA_ENGINE=hypothesis
 SYSLOG_PORT=1514
 ```
 
@@ -91,7 +90,7 @@ cp .env.example .env
 make docker-up
 ```
 
-Docker Compose でも backend は `RCA_ENGINE=hypothesis` で起動します。Compose では認証が有効です。`.env` にトークンを設定してください。
+Docker Compose では認証が有効です。`.env` にトークンを設定してください。
 
 ```bash
 AUTH_ADMIN_TOKEN="replace-with-a-long-random-secret"
@@ -118,7 +117,7 @@ make docker-down
 `hypothesis` は現在の標準エンジンです。通常の `/ingest` と UDP 受信はこの経路でインシデントを保存・通知します。
 
 ```bash
-RCA_ENGINE=hypothesis make restart
+make restart
 ```
 
 ### 比較: dual
@@ -126,7 +125,7 @@ RCA_ENGINE=hypothesis make restart
 `dual` は legacy と hypothesis を同じ SYSLOG で比較します。通常の保存・通知は legacy 側を使い、hypothesis の結果は debug API で確認します。
 
 ```bash
-RCA_ENGINE=dual make restart
+make restart
 ```
 
 ### rollback: legacy
@@ -134,7 +133,7 @@ RCA_ENGINE=dual make restart
 旧方式に戻す場合だけ明示します。
 
 ```bash
-RCA_ENGINE=legacy make restart
+make restart
 ```
 
 旧方式は保守・切戻し用途です。新規改善の主対象は hypothesis 側です。
@@ -305,9 +304,8 @@ Incident は `status` と `condition` を分けて管理します。
 | `condition` | `DEGRADED` | 一部だけ復旧 |
 | `condition` | `RECOVERING` | root cause または関連 object の復旧を検知し、quiet period 中 |
 | `condition` | `RECOVERED` | quiet period 中に再障害なし |
-| `condition` | `FLAPPING` | 復旧後に再障害を検知 |
 
-復旧 SYSLOG は新規 Incident を作らず、既存 OPEN Incident に対応付けます。quiet period は `RECOVERY_QUIET_PERIOD_SEC`、flapping 判定は `RECOVERY_FLAP_THRESHOLD` で調整します。
+復旧 SYSLOG は新規 Incident を作らず、既存 OPEN Incident に対応付けます。quiet period は `RECOVERY_QUIET_PERIOD_SEC` で調整します。
 
 ---
 
@@ -374,9 +372,7 @@ SKB は SYSLOG を運用上の意味へ分類します。設定例は [configs/s
 | メソッド | パス | 説明 |
 |---|---|---|
 | `POST` | `/ingest` | SYSLOG を投入し、hypothesis 経路で Incident を生成・更新 |
-| `GET` | `/debug/status` | topology / RCA engine / 受信数 / Incident 数を確認 |
-| `POST` | `/debug/rca/hypothesis` | 保存・通知なしで legacy と hypothesis の RCA 結果を比較 |
-| `POST` | `/debug/rca/migration-readiness` | ラベル付きサンプルで hypothesis の実用性を評価 |
+| `GET` | `/debug/status` | topology / 受信数 / Incident 数を確認 |
 | `GET` | `/incidents` | Incident 一覧 |
 | `GET` | `/incidents/{id}` | Incident 詳細 |
 | `PUT` | `/incidents/{id}/resolve` | Incident を `CLOSED` にする |
@@ -403,52 +399,20 @@ curl -s http://localhost:8080/ingest \
   }'
 ```
 
-### RCA 比較
-
-```bash
-curl -s http://localhost:8080/debug/rca/hypothesis \
-  -H 'content-type: application/json' \
-  -d '{"messages":[{"raw":"<35>Sep 5 08:13:06 Leaf2 %BGP-5-ADJCHANGE: neighbor Spine1 down"}]}'
-```
-
-### 移行・実用性評価
-
-```bash
-curl -s http://localhost:8080/debug/rca/migration-readiness \
-  -H 'content-type: application/json' \
-  -d '{
-    "min_accuracy": 0.8,
-    "min_confidence": 0.6,
-    "samples": [
-      {
-        "sample_id": "clos-link-spine1-leaf2",
-        "expected_root_cause_object": "PhysicalLink:Leaf2:GigabitEthernet0/0--Spine1:GigabitEthernet0/1",
-        "messages": [
-          {"raw": "<35>Sep 5 08:13:06 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down"},
-          {"raw": "<35>Sep 5 08:13:06 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down"}
-        ]
-      }
-    ]
-  }'
-```
-
 ---
 
 ## 設定
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `RCA_ENGINE` | `hypothesis` | `hypothesis` / `dual` / `legacy` |
 | `TOPOLOGY_PATH` | `configs/clos/yang_topology.yaml` in Makefile | トポロジー YAML |
 | `TOPOLOGY_SOURCE` | `iida-yaml` | トポロジー形式 |
 | `SKB_PATH` | なし | SKB YAML ファイルまたはディレクトリ |
-| `SYSLOG_IGNORE_FILE` | なし | 追加の無視パターン |
 | `API_HOST` | `0.0.0.0` | API bind address |
 | `API_PORT` | `8080` | API port |
 | `SYSLOG_HOST` | `0.0.0.0` | SYSLOG UDP bind address |
 | `SYSLOG_PORT` | `1514` | SYSLOG UDP port |
 | `RECOVERY_QUIET_PERIOD_SEC` | `30.0` | recovery 後に `RECOVERED` へ進むまでの静穏期間 |
-| `RECOVERY_FLAP_THRESHOLD` | `2` | flapping とみなす再障害回数 |
 | `DATABASE_URL` | `sqlite:///./incidents.db` | Incident DB |
 | `VIGIL_URL` | なし | vigil 連携 URL |
 | `AI_ENABLED` | `false` | AI レポート有効化 |
@@ -520,13 +484,11 @@ pytest -q \
 1. `make restart` で hypothesis 経路を起動します。
 2. リンク停止、装置停止、BGP session down、復旧ログを投入します。
 3. UI または `/incidents` で root cause と secondary nodes を確認します。
-4. `/debug/rca/hypothesis` で score component を確認します。
-5. ラベル付きサンプルを `/debug/rca/migration-readiness` に投入し、`ready`、`hypothesis_accuracy`、`average_hypothesis_confidence` を見ます。
+4. Incident 詳細画面で score component と RCA 根拠を確認します。
 
 切り戻し:
 
 ```bash
-RCA_ENGINE=legacy make restart
 ```
 
 ---

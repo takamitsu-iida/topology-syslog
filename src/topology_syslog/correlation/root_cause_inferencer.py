@@ -70,8 +70,6 @@ def _find_explicit_silent_root_candidates(
     """BGP peer loss で明示された、無発報の直接隣接 peer を返す。"""
     candidates: dict[str, set[str]] = {}
     for message in active:
-        if "interface flap" in message.message.lower():
-            continue
         match = _BGP_NEIGHBOR_LOST_RE.search(message.message)
         if match is None:
             continue
@@ -191,14 +189,12 @@ class RootCauseInferencer:
         self,
         severity_threshold: int = 5,
         silent_coverage: float = 0.6,
-        flapping_threshold: int = 3,
         node_state_reader: NodeStateReader | None = None,
     ) -> None:
         self._counters: dict[str, int] = {}
         # 0=EMERG…5=NOTICE を推論対象、6=INFO / 7=DEBUG は raw_logs のみ
         self._severity_threshold = severity_threshold
         self._silent_coverage = silent_coverage
-        self._flapping_threshold = flapping_threshold
         self._node_state_reader = node_state_reader
 
     def infer(

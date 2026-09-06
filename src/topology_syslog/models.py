@@ -30,7 +30,6 @@ class IncidentCondition(StrEnum):
     DEGRADED = "DEGRADED"
     RECOVERING = "RECOVERING"
     RECOVERED = "RECOVERED"
-    FLAPPING = "FLAPPING"
 
 
 @dataclass(frozen=True)
@@ -152,9 +151,7 @@ class Incident:
     maintenance_plan_id: str | None = None  # メンテナンス計画によって自動クローズされた場合の計画 ID
     last_fault_at: datetime | None = None
     last_recovery_at: datetime | None = None
-    flap_count: int = 0
     recovery_evidence: list[str] = field(default_factory=list)
-    flap_history: list[dict[str, object]] = field(default_factory=list)
     rca_explanation: RCAExplanation = field(default_factory=RCAExplanation)
     root_cause_object: str | None = None
     parent_incident_id: str | None = None

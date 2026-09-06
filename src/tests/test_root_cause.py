@@ -431,75 +431,13 @@ def test_interface_flap_on_spine_leaf_link_uses_logged_upstream_as_root():
         _msg("Leaf2", "%BGP_SESSION-5-ADJCHANGE: neighbor 10.1.12.1 IPv4 Unicast topology base removed from session Interface flap"),
     ]
 
-    incidents = RootCauseInferencer(flapping_threshold=0).infer(msgs, engine)
+    incidents = RootCauseInferencer().infer(msgs, engine)
 
     assert len(incidents) == 1
     assert incidents[0].root_cause_node == "Spine1"
     assert incidents[0].secondary_nodes == ["Leaf2"]
     assert incidents[0].primary_event == msgs[0].message
     assert incidents[0].primary_event != "(inferred \u2014 node did not send SYSLOG)"
-
-
-# ---------------------------------------------------------------------------
-# Phase 8-3: フラッピング検出
-# ---------------------------------------------------------------------------
-
-def test_flapping_detected_when_same_event_repeated():
-    """同一ノードで同一 %FAC-SEV-MNEM が閾値回以上 → FLAPPING インシデント"""
-    engine = _spine_leaf_engine(1)
-    msgs = [
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface Gi0/0 changed state to down"),
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface Gi0/0 changed state to up"),
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface Gi0/0 changed state to down"),
-    ]
-    incidents = RootCauseInferencer(flapping_threshold=3).infer(msgs, engine)
-    assert len(incidents) == 1
-    inc = incidents[0]
-    assert inc.root_cause_node == "Leaf1"
-    assert inc.status == "OPEN"
-    assert inc.condition == "FLAPPING"
-    assert "%LINK-3-UPDOWN" in inc.primary_event
-    assert "3x" in inc.primary_event
-
-
-def test_flapping_not_triggered_below_threshold():
-    """同一イベントが閾値未満のときは FLAPPING にならない"""
-    engine = _spine_leaf_engine(1)
-    msgs = [
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface Gi0/0 changed state to down"),
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface Gi0/0 changed state to up"),
-    ]
-    incidents = RootCauseInferencer(flapping_threshold=3).infer(msgs, engine)
-    # 2 回は閾値 3 未満 → 通常インシデント（ただしメッセージが active_nodes に含まれる）
-    assert all(i.condition != "FLAPPING" for i in incidents)
-
-
-def test_flapping_node_excluded_from_regular_inference():
-    """フラッピングノードは通常の根本原因推論から除外される"""
-    g = nx.DiGraph()
-    g.add_node("Router1", role="core")
-    g.add_node("Switch1", role="access")
-    g.add_edge("Router1", "Switch1", edge_type="physical")
-    engine = GraphEngine(g)
-
-    msgs = [
-        # Router1 は安定した障害（1回）
-        _msg("Router1", "%LINK-3-UPDOWN: Interface down"),
-        # Switch1 はフラッピング（3回）
-        _msg("Switch1", "%LINK-3-UPDOWN: Interface Gi0/1 down"),
-        _msg("Switch1", "%LINK-3-UPDOWN: Interface Gi0/1 up"),
-        _msg("Switch1", "%LINK-3-UPDOWN: Interface Gi0/1 down"),
-    ]
-    incidents = RootCauseInferencer(flapping_threshold=3).infer(msgs, engine)
-    conditions = {i.root_cause_node: i.condition for i in incidents}
-    statuses = {i.root_cause_node: i.status for i in incidents}
-    # Switch1 は FLAPPING condition
-    assert conditions.get("Switch1") == "FLAPPING"
-    # Router1 は通常インシデント（Switch1 を secondary として持たない）
-    router_inc = next(i for i in incidents if i.root_cause_node == "Router1")
-    assert router_inc.status == "OPEN"
-    assert router_inc.condition == "ACTIVE"
-    assert "Switch1" not in router_inc.secondary_nodes
 
 
 # ---------------------------------------------------------------------------

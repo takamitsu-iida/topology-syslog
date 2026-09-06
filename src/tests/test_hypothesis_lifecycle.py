@@ -147,27 +147,6 @@ def test_confirm_recovered_after_quiet_period():
     assert incident.condition == IncidentCondition.RECOVERED.value
 
 
-def test_fault_after_recovery_marks_flapping_at_threshold():
-    topology = _topology()
-    incident = _project_link_incident(topology)
-    recovery = _observation(
-        topology,
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up", 10, is_recovery=True),
-    )
-    fault = _observation(
-        topology,
-        _msg("Leaf1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down", 20),
-    )
-    lifecycle = HypothesisIncidentLifecycle(topology, flap_threshold=1)
-    lifecycle.apply_recovery(incident, recovery)
-
-    event = lifecycle.apply_fault(incident, fault)
-
-    assert event.event_type == HypothesisLifecycleEventType.FLAPPING
-    assert incident.condition == IncidentCondition.FLAPPING.value
-    assert incident.flap_count == 1
-
-
 def test_existing_interface_root_is_upheld_when_later_bgp_impact_is_merged():
     topology = _topology()
     lifecycle = HypothesisIncidentLifecycle(topology)

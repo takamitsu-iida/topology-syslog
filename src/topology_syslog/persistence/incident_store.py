@@ -36,9 +36,7 @@ class _IncidentRow(_Base):
     maintenance_plan_id  = Column(String,   nullable=True)
     last_fault_at        = Column(DateTime, nullable=True)
     last_recovery_at     = Column(DateTime, nullable=True)
-    flap_count           = Column(Integer,  nullable=False, server_default="0")
     recovery_evidence    = Column(JSON,     nullable=False, server_default="[]")
-    flap_history         = Column(JSON,     nullable=False, server_default="[]")
     rca_explanation      = Column(JSON,     nullable=False, server_default="{}")
     parent_incident_id   = Column(String,   nullable=True)
     child_incident_ids   = Column(JSON,     nullable=False, server_default="[]")
@@ -80,9 +78,7 @@ def _to_row(inc: Incident) -> _IncidentRow:
         maintenance_plan_id=inc.maintenance_plan_id,
         last_fault_at=inc.last_fault_at.replace(tzinfo=None) if inc.last_fault_at else None,
         last_recovery_at=inc.last_recovery_at.replace(tzinfo=None) if inc.last_recovery_at else None,
-        flap_count=inc.flap_count,
         recovery_evidence=inc.recovery_evidence,
-        flap_history=inc.flap_history,
         rca_explanation=_rca_to_json(inc.rca_explanation),
         parent_incident_id=inc.parent_incident_id,
         child_incident_ids=inc.child_incident_ids,
@@ -106,9 +102,7 @@ def _from_row(row: _IncidentRow) -> Incident:
         maintenance_plan_id=row.maintenance_plan_id,
         last_fault_at=row.last_fault_at.replace(tzinfo=timezone.utc) if row.last_fault_at else None,
         last_recovery_at=row.last_recovery_at.replace(tzinfo=timezone.utc) if row.last_recovery_at else None,
-        flap_count=int(row.flap_count or 0),
         recovery_evidence=list(row.recovery_evidence or []),
-        flap_history=list(row.flap_history or []),
         rca_explanation=_rca_from_json(dict(row.rca_explanation or {})),
         parent_incident_id=row.parent_incident_id,
         child_incident_ids=list(row.child_incident_ids or []),
@@ -133,9 +127,7 @@ class IncidentStore:
                 "ALTER TABLE incidents ADD COLUMN maintenance_plan_id TEXT",
                 "ALTER TABLE incidents ADD COLUMN last_fault_at TIMESTAMP",
                 "ALTER TABLE incidents ADD COLUMN last_recovery_at TIMESTAMP",
-                "ALTER TABLE incidents ADD COLUMN flap_count INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE incidents ADD COLUMN recovery_evidence JSON DEFAULT '[]'",
-                "ALTER TABLE incidents ADD COLUMN flap_history JSON DEFAULT '[]'",
                 "ALTER TABLE incidents ADD COLUMN rca_explanation JSON DEFAULT '{}'",
                 "ALTER TABLE incidents ADD COLUMN parent_incident_id TEXT",
                 "ALTER TABLE incidents ADD COLUMN child_incident_ids JSON DEFAULT '[]'",
@@ -171,9 +163,7 @@ class IncidentStore:
             row.maintenance_plan_id = incident.maintenance_plan_id
             row.last_fault_at = incident.last_fault_at.replace(tzinfo=None) if incident.last_fault_at else None
             row.last_recovery_at = incident.last_recovery_at.replace(tzinfo=None) if incident.last_recovery_at else None
-            row.flap_count = incident.flap_count
             row.recovery_evidence = incident.recovery_evidence
-            row.flap_history = incident.flap_history
             row.rca_explanation = _rca_to_json(incident.rca_explanation)
             row.parent_incident_id = incident.parent_incident_id
             row.child_incident_ids = incident.child_incident_ids
@@ -249,7 +239,7 @@ class IncidentStore:
             rows = session.scalars(
                 select(_IncidentRow)
                 .where(_IncidentRow.status == "OPEN")
-                .where(_IncidentRow.condition.in_(["ACTIVE", "FLAPPING"]))
+                .where(_IncidentRow.condition == "ACTIVE")
                 .order_by(desc(_IncidentRow.created_at))
             ).all()
             return [_from_row(r) for r in rows]
@@ -260,7 +250,7 @@ class IncidentStore:
             rows = session.scalars(
                 select(_IncidentRow)
                 .where(_IncidentRow.status == "OPEN")
-                .where(_IncidentRow.condition.in_(["ACTIVE", "DEGRADED", "RECOVERING", "RECOVERED", "FLAPPING"]))
+                .where(_IncidentRow.condition.in_(["ACTIVE", "DEGRADED", "RECOVERING", "RECOVERED"]))
                 .order_by(desc(_IncidentRow.created_at))
             ).all()
             return [_from_row(r) for r in rows]
@@ -311,7 +301,7 @@ class IncidentStore:
                 select(_IncidentRow)
                 .where(_IncidentRow.root_cause == root_cause_node)
                 .where(_IncidentRow.status == "OPEN")
-                .where(_IncidentRow.condition.in_(["ACTIVE", "FLAPPING"]))
+                .where(_IncidentRow.condition == "ACTIVE")
             ).all()
             ids = [r.incident_id for r in rows]
             for row in rows:

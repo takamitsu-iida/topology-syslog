@@ -40,15 +40,14 @@ def _args(topology: str, ingest: str) -> argparse.Namespace:
 
 def _clear_ingest_environment(monkeypatch) -> None:
     for key in (
-        "CORRELATION_MODE", "DATABASE_URL", "MAINTENANCE_DIR",
-        "RCA_ENGINE", "SYSLOG_IGNORE_FILE", "VIGIL_URL", "VIGIL_TEAM",
+        "DATABASE_URL", "MAINTENANCE_DIR",
+        "VIGIL_URL", "VIGIL_TEAM",
     ):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_api_server_startup_passes_rca_engine(monkeypatch):
+def test_api_server_startup_uses_hypothesis_pipeline(monkeypatch):
     _clear_ingest_environment(monkeypatch)
-    monkeypatch.setenv("RCA_ENGINE", "dual")
     monkeypatch.setattr(sys, "argv", ["topology-syslog"])
 
     app = object()
@@ -69,7 +68,7 @@ def test_api_server_startup_passes_rca_engine(monkeypatch):
 
     main()
 
-    assert create_app_calls[0]["rca_engine"] == "dual"
+    assert "rca_engine" not in create_app_calls[0]
     assert uvicorn_run_calls[0][0] is app
 
 

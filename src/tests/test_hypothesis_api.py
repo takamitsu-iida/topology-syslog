@@ -1,87 +1,7 @@
 import time
-import pytest
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import create_app
-
-
-def test_create_app_rejects_invalid_rca_engine():
-    with pytest.raises(ValueError, match="RCA_ENGINE must be one of"):
-        create_app(database_url="sqlite:///:memory:", rca_engine="invalid")
-
-
-def test_debug_status_reports_hypothesis_engine_state():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="dual",
-        syslog_port=0,
-    )
-
-    with TestClient(app) as client:
-        response = client.get("/debug/status")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["rca_engine"] == "dual"
-    assert body["causal_topology_loaded"] is True
-
-
-def test_debug_hypothesis_rca_returns_legacy_and_hypothesis_diff_without_saving():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="dual",
-        syslog_port=0,
-    )
-
-    with TestClient(app) as client:
-        response = client.post("/debug/rca/hypothesis", json={"messages": [
-            {
-                "source_ip": "127.0.0.1",
-                "raw": "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
-            },
-            {
-                "source_ip": "127.0.0.1",
-                "raw": "<35>Sep 5 08:13:06.021 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
-            },
-        ]})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["legacy"]["incident_count"] >= 1
-    assert body["hypothesis"]["available"] is True
-    assert body["hypothesis"]["root_cause_object"] == "PhysicalLink:Leaf2:GigabitEthernet0/0--Spine1:GigabitEthernet0/1"
-    assert body["hypothesis"]["projected_incident"] is not None
-    assert body["diff"]["hypothesis_root"] == body["hypothesis"]["root_cause_object"]
-    assert app.state.store.count() == 0
-    assert app.state.last_rca_comparison == body
-
-
-def test_dual_mode_ingest_keeps_legacy_response_and_records_comparison():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="dual",
-        syslog_port=0,
-    )
-
-    with TestClient(app) as client:
-        response = client.post("/ingest", json={"messages": [{
-            "source_ip": "127.0.0.1",
-            "raw": "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
-        }]})
-
-    assert response.status_code == 200
-    incidents = response.json()
-    assert len(incidents) == 1
-    assert app.state.store.count() == 1
-    assert app.state.last_rca_comparison is not None
-    assert app.state.last_rca_comparison["mode"] == "dual"
-    assert app.state.last_rca_comparison["hypothesis"]["available"] is True
 
 
 def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_recovery():
@@ -89,7 +9,6 @@ def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_r
         database_url="sqlite:///:memory:",
         topology_path="configs/clos/yang_topology.yaml",
         topology_source="iida-yaml",
-        rca_engine="hypothesis",
         syslog_port=0,
     )
 
@@ -145,7 +64,6 @@ def test_hypothesis_ingest_recreates_incident_after_same_interface_recovers(tmp_
         database_url=f"sqlite:///{tmp_path / 'interface-lifecycle.db'}",
         topology_path="configs/clos/yang_topology.yaml",
         topology_source="iida-yaml",
-        rca_engine="hypothesis",
         recovery_quiet_period_sec=0.01,
         syslog_port=0,
     )
@@ -181,7 +99,6 @@ def test_hypothesis_ingest_recreates_incident_after_same_link_recovers(tmp_path)
         database_url=f"sqlite:///{tmp_path / 'link-lifecycle.db'}",
         topology_path="configs/clos/yang_topology.yaml",
         topology_source="iida-yaml",
-        rca_engine="hypothesis",
         recovery_quiet_period_sec=0.01,
         syslog_port=0,
     )
@@ -212,45 +129,11 @@ def test_hypothesis_ingest_recreates_incident_after_same_link_recovers(tmp_path)
     assert second.json()[0]["incident_id"] != first_incident_id
 
 
-def test_hypothesis_ingest_keeps_repeated_leaf2_spine2_flap_in_one_incident():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="hypothesis",
-        syslog_port=0,
-        recovery_flap_threshold=1,
-    )
-
-    with TestClient(app) as client:
-        for state, second in [("down", "06.021"), ("up", "07.021"), ("down", "08.021"), ("up", "09.021")]:
-            response = client.post("/ingest", json={"messages": [
-                {
-                    "source_ip": "127.0.0.1",
-                    "raw": f"<35>Sep 5 08:13:{second} Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to {state}",
-                },
-                {
-                    "source_ip": "127.0.0.1",
-                    "raw": f"<35>Sep 5 08:13:{second} Spine2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to {state}",
-                },
-            ]})
-            assert response.status_code == 200
-
-        incidents = client.get("/incidents?include_children=true").json()["incidents"]
-
-    assert len(incidents) == 1
-    incident = incidents[0]
-    assert incident["condition"] == "FLAPPING"
-    assert incident["flap_count"] == 1
-    assert [entry["state"] for entry in incident["flap_history"]] == ["down", "up", "down", "up"]
-
-
 def test_hypothesis_ingest_persists_bgp_impact_as_child_incident():
     app = create_app(
         database_url="sqlite:///:memory:",
         topology_path="configs/clos/yang_topology.yaml",
         topology_source="iida-yaml",
-        rca_engine="hypothesis",
         syslog_port=0,
     )
 
@@ -269,78 +152,3 @@ def test_hypothesis_ingest_persists_bgp_impact_as_child_incident():
     assert parent["child_incident_ids"] == [child["incident_id"]]
     assert child["parent_incident_id"] == parent["incident_id"]
     assert child["root_cause_object"].startswith("BGPSession:")
-
-
-def test_migration_readiness_api_evaluates_labeled_samples_without_saving():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="dual",
-        syslog_port=0,
-    )
-
-    with TestClient(app) as client:
-        response = client.post("/debug/rca/migration-readiness", json={
-            "min_accuracy": 0.5,
-            "min_confidence": 0.3,
-            "samples": [
-                {
-                    "sample_id": "clos-link-spine1-leaf2",
-                    "expected_root_cause_object": "PhysicalLink:Leaf2:GigabitEthernet0/0--Spine1:GigabitEthernet0/1",
-                    "expected_legacy_nodes": ["Leaf2", "Spine1"],
-                    "messages": [
-                        {
-                            "source_ip": "127.0.0.1",
-                            "raw": "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
-                        },
-                        {
-                            "source_ip": "127.0.0.1",
-                            "raw": "<35>Sep 5 08:13:06.021 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
-                        },
-                    ],
-                }
-            ],
-        })
-        status = client.get("/debug/status")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["ready"] is True
-    assert body["recommended_engine"] == "hypothesis"
-    assert body["rollback_engine"] == "legacy"
-    assert body["samples"][0]["hypothesis_matches_expected"] is True
-    assert app.state.store.count() == 0
-    assert status.json()["last_rca_migration_readiness"] == body
-
-
-def test_migration_readiness_api_keeps_dual_when_samples_miss():
-    app = create_app(
-        database_url="sqlite:///:memory:",
-        topology_path="configs/clos/yang_topology.yaml",
-        topology_source="iida-yaml",
-        rca_engine="dual",
-        syslog_port=0,
-    )
-
-    with TestClient(app) as client:
-        response = client.post("/debug/rca/migration-readiness", json={
-            "min_accuracy": 1.0,
-            "min_confidence": 0.9,
-            "samples": [
-                {
-                    "sample_id": "wrong-expectation",
-                    "expected_root_cause_object": "Device:Spine2",
-                    "messages": [{
-                        "source_ip": "127.0.0.1",
-                        "raw": "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
-                    }],
-                }
-            ],
-        })
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["ready"] is False
-    assert body["recommended_engine"] == "dual"
-    assert body["rollback_engine"] == "legacy"

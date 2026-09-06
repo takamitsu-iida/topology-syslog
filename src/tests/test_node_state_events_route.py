@@ -198,7 +198,6 @@ def test_down_after_recovery_creates_new_incident(tmp_path):
         syslog_port=0,
         node_monitor_event_token="event-token",
         recovery_quiet_period_sec=0.01,
-        recovery_flap_threshold=2,
     )
     with TestClient(app) as test_client:
         app.state.store.save(Incident(
@@ -277,7 +276,6 @@ def test_repeated_down_up_cycles_create_new_incident_after_recovery(tmp_path):
         syslog_port=0,
         node_monitor_event_token="event-token",
         recovery_quiet_period_sec=0.01,
-        recovery_flap_threshold=2,
     )
     headers = {"Authorization": "Bearer event-token"}
     with TestClient(app) as test_client:

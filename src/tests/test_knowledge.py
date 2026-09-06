@@ -53,7 +53,6 @@ def _hypothesis_app(tmp_path, **kwargs):
         database_url="sqlite:///:memory:",
         topology_path=_hypothesis_topology_file(tmp_path),
         topology_source="iida-yaml",
-        rca_engine="hypothesis",
         syslog_port=0,
         **kwargs,
     )
@@ -480,7 +479,6 @@ def test_fault_during_quiet_period_keeps_incident_unrecovered(tmp_path):
         tmp_path,
         knowledge_path=str(rules_path),
         recovery_quiet_period_sec=0.02,
-        recovery_flap_threshold=1,
     )
     with TestClient(app):
         app.state.graph = _single_node_graph()
@@ -496,7 +494,7 @@ def test_fault_during_quiet_period_keeps_incident_unrecovered(tmp_path):
             await __import__("asyncio").sleep(0.03)
 
             updated = app.state.store.get_by_id(incident.incident_id)
-            assert updated.condition == "RECOVERED"
+            assert updated.condition == "ACTIVE"
             assert updated.last_fault_at is not None
 
         __import__("asyncio").run(scenario())

@@ -6,7 +6,7 @@ import json
 import logging
 from copy import deepcopy
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import yaml
 from fastapi import FastAPI
@@ -26,19 +26,14 @@ from topology_syslog.api.routes.raw_logs import router as raw_logs_router
 from topology_syslog.api.routes.topology import router as topology_router
 from topology_syslog.api.routes.ws import ConnectionManager, router as ws_router
 from topology_syslog.api.schemas import IncidentOut
-from topology_syslog.correlation.incident_lifecycle import IncidentLifecycle
-from topology_syslog.correlation.incident_merger import IncidentMerger, MergeAction
 from topology_syslog.correlation.incident_projector import IncidentProjector
 from topology_syslog.correlation.hypothesis_lifecycle import HypothesisIncidentLifecycle, HypothesisLifecycleEventType
 from topology_syslog.correlation.hypothesis_rca import HypothesisRCAEngine
 from topology_syslog.correlation.observation_buffer import ObservationBuffer
 from topology_syslog.correlation.observation import ObservationNormalizer
-from topology_syslog.correlation.rca_migration import RCASampleEvaluation, evaluate_migration_readiness, readiness_to_dict
-from topology_syslog.correlation.recovery_matcher import RecoveryMatcher
-from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.syslog_filter import SyslogFilter
 from topology_syslog.ingestion.syslog_receiver import start_receiver
-from topology_syslog.knowledge.classifier import EventClassifier, can_create_new_incident, should_skip_inference
+from topology_syslog.knowledge.classifier import EventClassifier, should_skip_inference
 from topology_syslog.models import EventClassification
 from topology_syslog.notification.base import NotificationEvent
 from topology_syslog.persistence.incident_store import IncidentStore
@@ -51,37 +46,6 @@ from topology_syslog.topology.graph_engine import GraphEngine
 from topology_syslog.topology.yang_loader import TopologyLoader, device_severity_map
 
 _logger = logging.getLogger(__name__)
-
-
-_ROUTING_PREFIXES = ("%BGP", "%OSPF-", "%ISIS-", "%EIGRP-", "%RIP-")
-_SILENT_ROOT_EVENT = "(inferred — node did not send SYSLOG)"
-_RCA_ENGINE_MODES = frozenset({"legacy", "hypothesis", "dual"})
-
-
-def _burst_detected(
-    buffer: list,
-    burst_window_sec: float,
-    burst_threshold: int,
-) -> bool:
-    """直近 burst_window_sec 秒以内に burst_threshold 件以上のメッセージがあるか。"""
-    if burst_threshold <= 0 or burst_window_sec <= 0:
-        return False
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=burst_window_sec)
-    return sum(1 for m in buffer if m.received_at >= cutoff) >= burst_threshold
-
-
-def _has_routing_events(buffer: list) -> bool:
-    """BGP/OSPF 等ルーティングイベントがバッファに含まれるか。"""
-    return any(
-        any(p in m.message for p in _ROUTING_PREFIXES)
-        for m in buffer
-    )
-
-
-def _can_create_inferred_incident(incident, classification_result, *, enforce: bool) -> bool:
-    if incident.primary_event == _SILENT_ROOT_EVENT:
-        return True
-    return can_create_new_incident(classification_result, enforce=enforce)
 
 
 def _incident_root_cause_object(incident) -> str | None:
@@ -140,8 +104,6 @@ def _merge_projected_hypothesis_incident(existing, projected, observation, lifec
         if node != projected.root_cause_node
     ]
     projected.recovery_evidence = existing.recovery_evidence
-    projected.flap_count = existing.flap_count
-    projected.flap_history = existing.flap_history
     projected.condition = existing.condition
     projected.status = existing.status
     projected.last_recovery_at = existing.last_recovery_at
@@ -189,79 +151,6 @@ async def _persist_impact_children(app: FastAPI, parent, projected) -> None:
         await asyncio.to_thread(app.state.store.update, parent)
 
 
-def _compare_rca_engines(app: FastAPI, messages: list) -> dict:
-    graph = getattr(app.state, "graph", None)
-    hypothesis_engine = getattr(app.state, "hypothesis_engine", None)
-    hypothesis_projector = getattr(app.state, "hypothesis_projector", None)
-    legacy_incidents = []
-    hypothesis_result = None
-    projected = None
-
-    if graph is not None:
-        legacy_incidents = app.state.inferencer.infer(messages, graph)
-    if hypothesis_engine is not None:
-        hypothesis_result = hypothesis_engine.infer(messages)
-        if hypothesis_projector is not None:
-            projected = hypothesis_projector.project(hypothesis_result)
-
-    legacy_roots = [incident.root_cause_node for incident in legacy_incidents]
-    hypothesis_root = hypothesis_result.root_cause_object if hypothesis_result is not None else None
-    return {
-        "mode": getattr(app.state, "rca_engine", "legacy"),
-        "legacy": {
-            "incident_count": len(legacy_incidents),
-            "root_cause_nodes": legacy_roots,
-            "incidents": [IncidentOut.model_validate(incident).model_dump(mode="json") for incident in legacy_incidents],
-        },
-        "hypothesis": _serialize_hypothesis_result(hypothesis_result, projected),
-        "diff": {
-            "root_changed": bool(hypothesis_root is not None and set(legacy_roots) != {hypothesis_root}),
-            "legacy_roots": legacy_roots,
-            "hypothesis_root": hypothesis_root,
-        },
-    }
-
-
-def _serialize_hypothesis_result(result, projected) -> dict:
-    if result is None:
-        return {"available": False, "root_cause_object": None, "confidence": 0.0, "hypotheses": [], "projected_incident": None}
-    return {
-        "available": True,
-        "root_cause_object": result.root_cause_object,
-        "confidence": result.confidence,
-        "observations": [
-            {
-                "observed_at": observation.observed_at.isoformat(),
-                "received_at": observation.received_at.isoformat() if observation.received_at is not None else None,
-                "source_node": observation.source_node,
-                "observed_object": observation.observed_object,
-                "assertion": observation.assertion,
-                "signature": observation.signature,
-                "severity": observation.severity,
-                "confidence": observation.confidence,
-            }
-            for observation in result.observations
-        ],
-        "hypotheses": [
-            {
-                "root_cause_object": hypothesis.root_cause_object,
-                "score": hypothesis.score,
-                "covered_observations": list(hypothesis.covered_observations),
-                "reasons": list(hypothesis.reasons),
-                "score_components": [
-                    {"name": component.name, "value": component.value, "detail": component.detail}
-                    for component in hypothesis.score_components
-                ],
-            }
-            for hypothesis in result.hypotheses
-        ],
-        "projected_incident": (
-            IncidentOut.model_validate(projected.incident).model_dump(mode="json")
-            if projected is not None else None
-        ),
-    }
-
-
 async def _process_message_immediately(app: FastAPI, msg) -> list:
     if app.state.syslog_filter.is_ignored(msg):
         return []
@@ -285,131 +174,7 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
         _logger.warning("Syslog received but topology not loaded — set TOPOLOGY_PATH")
         return []
 
-    if getattr(app.state, "rca_engine", "hypothesis") == "hypothesis":
-        return await _process_message_hypothesis(app, msg, rule, classification_result, classification_enforced)
-
-    if getattr(app.state, "rca_engine", "legacy") == "dual":
-        app.state.last_rca_comparison = _compare_rca_engines(app, [msg])
-
-    if msg.is_recovery:
-        if not graph.node_exists(msg.hostname):
-            return []
-        open_incidents = await asyncio.to_thread(app.state.store.list_open_lifecycle)
-        matches = app.state.recovery_matcher.find_matches(msg, open_incidents)
-        updated_ids: set[str] = set()
-        for incident in open_incidents:
-            incident_matches = [match for match in matches if match.incident.incident_id == incident.incident_id]
-            if not incident_matches:
-                continue
-            updated = app.state.lifecycle.apply_recovery(incident, incident_matches, msg.received_at)
-            if await asyncio.to_thread(app.state.store.update, updated):
-                updated_ids.add(updated.incident_id)
-                await _notify_lifecycle(app, updated, NotificationEvent.RECOVERING)
-                await app.state.ws_manager.broadcast({
-                    "type": "incident.recovering",
-                    "incident_id": updated.incident_id,
-                    "incident": IncidentOut.model_validate(updated).model_dump(mode="json"),
-                })
-                _schedule_recovery_confirmation(app, updated.incident_id, msg.received_at)
-        if app.state.vigil_notifier is not None:
-            try:
-                await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, msg.hostname)
-            except Exception:
-                _logger.warning("Failed to resolve vigil incidents for node %s", msg.hostname)
-        if not updated_ids:
-            _logger.debug("Recovery SYSLOG did not match any open incident: node=%s signature=%s", msg.hostname, msg.normalized_signature)
-        return [
-            incident for incident in open_incidents
-            if incident.incident_id in updated_ids
-        ]
-
-    if app.state.maintenance_checker is not None:
-        app.state.maintenance_checker.reload_if_changed()
-
-    try:
-        incidents = app.state.inferencer.infer([msg], graph)
-    except Exception:
-        _logger.exception("Error inferring incident from single syslog message")
-        return []
-
-    if not incidents:
-        return []
-
-    open_incidents = await asyncio.to_thread(app.state.store.list_open_active)
-    affected_incidents = []
-    for inc in incidents:
-        inc = app.state.lifecycle.apply_fault(
-            inc, msg, flap_threshold=app.state.recovery_flap_threshold
-        )
-        if app.state.maintenance_checker is not None:
-            plan = app.state.maintenance_checker.find_active_plan(inc, at=msg.received_at, graph=graph)
-            if plan is not None:
-                inc.status = "CLOSED"
-                inc.maintenance_plan_id = plan.plan_id
-                _logger.info(
-                    "Auto-closed %s (root_cause=%s): matches maintenance plan %s '%s'",
-                    inc.incident_id, inc.root_cause_node,
-                    plan.plan_id, plan.title,
-                )
-
-        count_method = (
-            app.state.store.count_by_root_cause_object
-            if inc.root_cause_object
-            else app.state.store.count_by_root_cause
-        )
-        inc.recurrence_count = await asyncio.to_thread(count_method, inc.root_cause_object or inc.root_cause_node)
-        decision = app.state.merger.find_merge_target(inc, open_incidents, graph)
-
-        if decision.action == MergeAction.NEW:
-            if not _can_create_inferred_incident(
-                inc, classification_result, enforce=classification_enforced
-            ):
-                _logger.debug(
-                    "Suppressing new incident for non-fault SYSLOG: signature=%s classification=%s action=%s",
-                    msg.normalized_signature,
-                    classification_result.classification.value,
-                    classification_result.action.value if classification_result.action else None,
-                )
-                continue
-            await asyncio.to_thread(app.state.store.save, inc)
-            if app.state.vigil_notifier is not None:
-                try:
-                    await asyncio.to_thread(app.state.vigil_notifier.send, inc)
-                except Exception:
-                    _logger.warning("Failed to forward incident %s to vigil", inc.incident_id, exc_info=True)
-            await app.state.ws_manager.broadcast({
-                "type": "incident.new",
-                "incident": IncidentOut.model_validate(inc).model_dump(mode="json"),
-            })
-            open_incidents.append(inc)
-            affected_incidents.append(inc)
-            continue
-
-        target = decision.target
-        if target is None:
-            await asyncio.to_thread(app.state.store.save, inc)
-            affected_incidents.append(inc)
-            continue
-
-        merged = app.state.merger.merge(target, inc, graph)
-        merged.recurrence_count = inc.recurrence_count
-        if await asyncio.to_thread(app.state.store.update, merged):
-            event = NotificationEvent.UPDATED
-            await _notify_lifecycle(app, merged, event)
-            await app.state.ws_manager.broadcast({
-                "type": "incident.updated",
-                "incident": IncidentOut.model_validate(merged).model_dump(mode="json"),
-            })
-        else:
-            await asyncio.to_thread(app.state.store.save, merged)
-
-        for idx, existing in enumerate(open_incidents):
-            if existing.incident_id == target.incident_id:
-                open_incidents[idx] = merged
-                break
-        affected_incidents.append(merged)
-
-    return affected_incidents
+    return await _process_message_hypothesis(app, msg, rule, classification_result, classification_enforced)
 
 
 async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_result, classification_enforced: bool) -> list:
@@ -506,7 +271,11 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
                 return [incident]
 
     matching_open = _find_matching_hypothesis_incident(
-        await asyncio.to_thread(app.state.store.list_open_active),
+        [
+            incident
+            for incident in await asyncio.to_thread(app.state.store.list_open_lifecycle)
+            if incident.condition != "RECOVERED"
+        ],
         update.current_root_cause_object,
         lifecycle,
     )
@@ -565,8 +334,11 @@ async def _confirm_recovery_after_quiet_period(app: FastAPI, incident_id: str, r
             return
         if incident.last_fault_at is not None and incident.last_fault_at > recovery_seen_at:
             return
-        recovered = app.state.lifecycle.mark_recovered(incident, datetime.now(tz=timezone.utc))
-        if await asyncio.to_thread(app.state.store.update, recovered):
+        event = app.state.hypothesis_lifecycle.confirm_recovered(
+            incident, datetime.now(tz=timezone.utc)
+        )
+        recovered = event.incident
+        if recovered is not None and await asyncio.to_thread(app.state.store.update, recovered):
             await _notify_lifecycle(app, recovered, NotificationEvent.RECOVERED)
             await app.state.ws_manager.broadcast({
                 "type": "incident.recovered",
@@ -601,17 +373,8 @@ def create_app(
     ignore_patterns: list[str] | None = None,
     syslog_host: str = "0.0.0.0",
     syslog_port: int = 1514,
-    correlation_mode: str = "immediate",
-    rca_engine: str = "hypothesis",
-    window_sec: int = 30,
-    burst_window_sec: float = 5.0,
-    burst_threshold: int = 3,
-    window_extend_factor: float = 2.0,
-    window_sec_max: int = 120,
     inference_severity_threshold: int = 5,
-    flapping_threshold: int = 3,
     recovery_quiet_period_sec: float = 30.0,
-    recovery_flap_threshold: int = 2,
     ai_enabled: bool = False,
     ai_rag_path: str = ".chromadb",
     ai_cache_ttl_days: int = 7,
@@ -631,8 +394,6 @@ def create_app(
     node_monitor_token: str | None = None,
     node_monitor_event_token: str | None = None,
 ) -> FastAPI:
-    if rca_engine not in _RCA_ENGINE_MODES:
-        raise ValueError("RCA_ENGINE must be one of: legacy, hypothesis, dual")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -656,15 +417,7 @@ def create_app(
             app.state.unknown_event_store = UnknownEventStore(database_url)
             _logger.info("SYSLOG Knowledge Base loaded from %s", knowledge_path)
         app.state.ws_manager = ConnectionManager()
-        app.state.rca_engine = rca_engine
-        app.state.last_rca_comparison = None
-        app.state.last_rca_migration_readiness = None
-        app.state.correlation_mode = correlation_mode
-        app.state.merger = IncidentMerger()
-        app.state.lifecycle = IncidentLifecycle()
-        app.state.recovery_matcher = RecoveryMatcher()
         app.state.recovery_quiet_period_sec = recovery_quiet_period_sec
-        app.state.recovery_flap_threshold = recovery_flap_threshold
         app.state.recovery_tasks = {}
         app.state.event_classifier = EventClassifier()
         app.state.maintenance_checker = (
@@ -681,11 +434,6 @@ def create_app(
         if node_monitor_url:
             from topology_syslog.node_monitor.client import HttpNodeStateReader
             app.state.node_state_reader = HttpNodeStateReader(node_monitor_url, auth_token=node_monitor_token)
-        app.state.inferencer = RootCauseInferencer(
-            severity_threshold=inference_severity_threshold,
-            flapping_threshold=flapping_threshold,
-            node_state_reader=app.state.node_state_reader,
-        )
         # Syslog フィルター: デフォルトパターン + ファイル/引数パターンを合成
         app.state.ignore_file = ignore_file
         extra: list[str] = list(ignore_patterns or [])
@@ -719,7 +467,6 @@ def create_app(
                 app.state.hypothesis_lifecycle = HypothesisIncidentLifecycle(
                     app.state.causal_topology,
                     quiet_period_sec=recovery_quiet_period_sec,
-                    flap_threshold=recovery_flap_threshold,
                 )
                 app.state.hypothesis_active_incident_id = None
                 app.state.hypothesis_active_root_object = None

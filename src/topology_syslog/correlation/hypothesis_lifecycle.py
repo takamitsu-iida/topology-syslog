@@ -34,15 +34,11 @@ class HypothesisIncidentLifecycle:
         topology: CausalTopology,
         *,
         quiet_period_sec: float = 30.0,
-        flap_threshold: int = 2,
     ) -> None:
         if quiet_period_sec < 0:
             raise ValueError("quiet_period_sec must be non-negative")
-        if flap_threshold < 1:
-            raise ValueError("flap_threshold must be positive")
         self._topology = topology
         self._quiet_period = timedelta(seconds=quiet_period_sec)
-        self._flap_threshold = flap_threshold
 
     def apply_recovery(self, incident: Incident, observation: Observation) -> HypothesisLifecycleEvent:
         if incident.status != "OPEN" or observation.assertion != "recovery":
@@ -75,12 +71,8 @@ class HypothesisIncidentLifecycle:
             return HypothesisLifecycleEvent(HypothesisLifecycleEventType.NO_MATCH)
 
         incident.last_fault_at = observation.observed_at
-        if incident.condition in {IncidentCondition.RECOVERING.value, IncidentCondition.RECOVERED.value}:
-            incident.condition = IncidentCondition.ACTIVE.value
-            event_type = HypothesisLifecycleEventType.FAULT_APPLIED
-        else:
-            incident.condition = IncidentCondition.ACTIVE.value
-            event_type = HypothesisLifecycleEventType.FAULT_APPLIED
+        incident.condition = IncidentCondition.ACTIVE.value
+        event_type = HypothesisLifecycleEventType.FAULT_APPLIED
         return HypothesisLifecycleEvent(
             event_type=event_type,
             incident=incident,
