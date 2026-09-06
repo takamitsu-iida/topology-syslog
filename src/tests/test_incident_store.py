@@ -95,6 +95,15 @@ def test_list_ordered_by_desc_created_at():
     assert results[0].incident_id == "INC-NEWER"
 
 
+def test_list_order_is_stable_when_created_at_is_equal():
+    store = _store()
+    created_at = datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc)
+    store.save(_inc("INC-A", created_at=created_at))
+    store.save(_inc("INC-B", created_at=created_at))
+    results = store.list_incidents()
+    assert [incident.incident_id for incident in results] == ["INC-B", "INC-A"]
+
+
 def test_resolve_existing():
     store = _store()
     inc = _inc()

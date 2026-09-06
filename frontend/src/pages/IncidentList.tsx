@@ -43,9 +43,8 @@ export function IncidentList() {
   })
 
   const rawLogPreview = useQuery({
-    queryKey: ['raw-logs', 'incident-empty-preview'],
+    queryKey: ['raw-logs', 'latest-preview'],
     queryFn: () => listRawLogs({ limit: RAW_LOG_PREVIEW_LIMIT }),
-    enabled: data?.incidents.length === 0,
     refetchInterval: 30_000,
   })
 
@@ -213,41 +212,39 @@ export function IncidentList() {
             }
           />
         ))}
-        {data?.incidents.length === 0 && (
-          <section className="border border-gray-200 bg-white p-4" aria-label="Raw SYSLOG受信状況">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-gray-800">インシデントなし</h2>
-                {rawLogPreview.isLoading && <p className="mt-1 text-sm text-gray-500">Raw SYSLOG の受信状況を確認中です。</p>}
-                {rawLogPreview.isError && <p className="mt-1 text-sm text-amber-700">Raw SYSLOG の受信状況を取得できません。</p>}
-                {rawLogPreview.data?.logs.length === 0 && <p className="mt-1 text-sm text-gray-500">Raw SYSLOG もまだ保存されていません。受信設定、送信元、時刻を確認してください。</p>}
-                {rawLogPreview.data && rawLogPreview.data.logs.length > 0 && <p className="mt-1 text-sm text-gray-500">Raw SYSLOG は受信されています。直近のログは新規インシデント作成条件には該当していません。</p>}
-              </div>
-              <Link to="/raw-logs" className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Raw SYSLOG を開く</Link>
-            </div>
-            {rawLogPreview.data && rawLogPreview.data.logs.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="border-b bg-gray-50 text-xs text-gray-500">
-                    <tr><th className="px-3 py-2">受信時刻</th><th className="px-3 py-2">装置</th><th className="px-3 py-2">Severity</th><th className="px-3 py-2">処理</th><th className="px-3 py-2">メッセージ</th></tr>
-                  </thead>
-                  <tbody>
-                    {rawLogPreview.data.logs.map((log) => (
-                      <tr key={log.log_id} className="border-b last:border-b-0 align-top">
-                        <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">{formatTime(log.received_at)}</td>
-                        <td className="px-3 py-2 font-medium text-gray-800">{log.hostname}</td>
-                        <td className="px-3 py-2 text-gray-700">S{log.severity}</td>
-                        <td className="px-3 py-2 text-xs text-gray-600">{log.event_classification}<br /><span className="text-gray-500">{log.event_action ?? '-'}</span></td>
-                        <td className="max-w-xl px-3 py-2 font-mono text-xs text-gray-700 break-words">{log.message}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        )}
       </div>
+      <section className="mt-4 border border-gray-200 bg-white p-4" aria-label="Raw SYSLOG受信状況">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800">直近のRaw SYSLOG</h2>
+            {rawLogPreview.isLoading && <p className="mt-1 text-sm text-gray-500">Raw SYSLOG の受信状況を確認中です。</p>}
+            {rawLogPreview.isError && <p className="mt-1 text-sm text-amber-700">Raw SYSLOG の受信状況を取得できません。</p>}
+            {rawLogPreview.data?.logs.length === 0 && <p className="mt-1 text-sm text-gray-500">Raw SYSLOG はまだ保存されていません。受信設定、送信元、時刻を確認してください。</p>}
+            {rawLogPreview.data && rawLogPreview.data.logs.length > 0 && <p className="mt-1 text-sm text-gray-500">受信済みの最新{rawLogPreview.data.logs.length}件を表示しています。</p>}
+          </div>
+          <Link to="/raw-logs" className="rounded border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Raw SYSLOG を開く</Link>
+        </div>
+        {rawLogPreview.data && rawLogPreview.data.logs.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b bg-gray-50 text-xs text-gray-500">
+                <tr><th className="px-3 py-2">受信時刻</th><th className="px-3 py-2">装置</th><th className="px-3 py-2">Severity</th><th className="px-3 py-2">処理</th><th className="px-3 py-2">メッセージ</th></tr>
+              </thead>
+              <tbody>
+                {rawLogPreview.data.logs.map((log) => (
+                  <tr key={log.log_id} className="border-b last:border-b-0 align-top">
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">{formatTime(log.received_at)}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{log.hostname}</td>
+                    <td className="px-3 py-2 text-gray-700">S{log.severity}</td>
+                    <td className="px-3 py-2 text-xs text-gray-600">{log.event_classification}<br /><span className="text-gray-500">{log.event_action ?? '-'}</span></td>
+                    <td className="max-w-xl px-3 py-2 font-mono text-xs text-gray-700 break-words">{log.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

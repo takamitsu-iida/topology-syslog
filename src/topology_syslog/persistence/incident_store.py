@@ -240,7 +240,7 @@ class IncidentStore:
                 stmt = stmt.where(_IncidentRow.created_at >= from_dt.replace(tzinfo=None))
             if to_dt:
                 stmt = stmt.where(_IncidentRow.created_at <= to_dt.replace(tzinfo=None))
-            stmt = stmt.order_by(desc(_IncidentRow.created_at))
+            stmt = stmt.order_by(desc(_IncidentRow.created_at), desc(_IncidentRow.incident_id))
             return [_from_row(r) for r in session.scalars(stmt).all()]
 
     def list_open_active(self) -> list[Incident]:
