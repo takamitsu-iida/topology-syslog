@@ -82,6 +82,17 @@ def _can_create_inferred_incident(incident, classification_result, *, enforce: b
     return can_create_new_incident(classification_result, enforce=enforce)
 
 
+def _incident_root_cause_object(incident) -> str | None:
+    candidate = incident.rca_explanation.primary_candidate
+    if candidate is None:
+        return None
+    for evidence in candidate.evidences:
+        for related_log_id in evidence.related_log_ids:
+            if ":" in related_log_id:
+                return related_log_id
+    return None
+
+
 def _compare_rca_engines(app: FastAPI, messages: list) -> dict:
     graph = getattr(app.state, "graph", None)
     hypothesis_engine = getattr(app.state, "hypothesis_engine", None)
@@ -329,6 +340,10 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
                     "incident": IncidentOut.model_validate(event.incident).model_dump(mode="json"),
                 })
                 _schedule_recovery_confirmation(app, event.incident.incident_id, observation.observed_at)
+        if affected:
+            buffer.reset()
+            app.state.hypothesis_active_incident_id = None
+            app.state.hypothesis_active_root_object = None
         if app.state.vigil_notifier is not None:
             try:
                 await asyncio.to_thread(app.state.vigil_notifier.resolve_by_source, msg.hostname)
@@ -356,7 +371,8 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     active_id = getattr(app.state, "hypothesis_active_incident_id", None)
     active_root = getattr(app.state, "hypothesis_active_root_object", None)
     should_update_active = active_id is not None and (
-        active_root == update.current_root_cause_object or update.previous_root_cause_object is not None
+        active_root == update.current_root_cause_object
+        or update.previous_root_cause_object == active_root
     )
     if should_update_active:
         existing = await asyncio.to_thread(app.state.store.get_by_id, active_id)
@@ -387,7 +403,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     matching_open = next(
         (
             existing for existing in await asyncio.to_thread(app.state.store.list_open_lifecycle)
-            if existing.root_cause_node == incident.root_cause_node
+            if _incident_root_cause_object(existing) == update.current_root_cause_object
         ),
         None,
     )

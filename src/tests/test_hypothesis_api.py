@@ -83,6 +83,62 @@ def test_dual_mode_ingest_keeps_legacy_response_and_records_comparison():
     assert app.state.last_rca_comparison["hypothesis"]["available"] is True
 
 
+def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_recovery():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/clos/yang_topology.yaml",
+        topology_source="iida-yaml",
+        rca_engine="hypothesis",
+        syslog_port=0,
+    )
+
+    with TestClient(app) as client:
+        first_down = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:06.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:06.022 Spine2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
+            },
+        ]})
+        first_up = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:07.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to up",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:07.022 Spine2 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to up",
+            },
+        ]})
+        second_down = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:20.021 Leaf2 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down",
+            },
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:20.022 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down",
+            },
+        ]})
+        incidents = client.get("/incidents").json()["incidents"]
+
+    assert first_down.status_code == 200
+    assert first_up.status_code == 200
+    assert second_down.status_code == 200
+    assert len(incidents) == 2
+    root_objects = {
+        incident["rca_explanation"]["primary_candidate"]["evidences"][0]["related_log_ids"][0]
+        for incident in incidents
+    }
+    assert root_objects == {
+        "PhysicalLink:Leaf2:GigabitEthernet0/1--Spine2:GigabitEthernet0/1",
+        "PhysicalLink:Leaf2:GigabitEthernet0/0--Spine1:GigabitEthernet0/1",
+    }
+
+
 def test_migration_readiness_api_evaluates_labeled_samples_without_saving():
     app = create_app(
         database_url="sqlite:///:memory:",

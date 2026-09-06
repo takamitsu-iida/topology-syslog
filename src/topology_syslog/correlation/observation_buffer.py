@@ -46,6 +46,10 @@ class ObservationBuffer:
     def observations(self) -> tuple[Observation, ...]:
         return tuple(self._observations)
 
+    def reset(self) -> None:
+        self._observations = []
+        self._last_result = None
+
     def add(self, observation: Observation, *, received_at: datetime | None = None) -> BufferUpdate:
         if received_at is not None:
             observation = _with_received_at(observation, received_at)
