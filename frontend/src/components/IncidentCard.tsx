@@ -61,9 +61,11 @@ export function IncidentCard({ incident, onResolve }: Props) {
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${status.cls}`}>
             {status.label}
           </span>
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${condition.cls}`}>
-            {condition.label}
-          </span>
+          {isOpen && (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${condition.cls}`}>
+              {condition.label}
+            </span>
+          )}
         </div>
       </div>
 
