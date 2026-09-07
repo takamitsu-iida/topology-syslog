@@ -171,6 +171,7 @@ export interface RawLog {
   event_action: string | null
   classification_reasons: Array<{ source: string; detail: string; confidence: number }>
   incident_related: boolean
+  recovery_event: boolean
 }
 
 export interface RawLogListResponse {

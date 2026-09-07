@@ -161,12 +161,12 @@ export function IncidentList() {
               </thead>
               <tbody>
                 {rawLogPreview.data.logs.map((log) => (
-                  <tr key={log.log_id} className={`border-b last:border-b-0 align-top ${log.incident_related ? 'bg-amber-50' : ''}`}>
+                  <tr key={log.log_id} className={`border-b last:border-b-0 align-top ${log.recovery_event ? 'bg-emerald-50' : log.incident_related ? 'bg-amber-50' : ''}`}>
                     <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-600">{formatTime(log.received_at)}</td>
                     <td className="px-3 py-2 font-medium text-gray-800">{log.hostname}</td>
                     <td className="px-3 py-2 text-gray-700">S{log.severity}</td>
                     <td className="px-3 py-2 text-xs text-gray-600">{log.event_classification}<br /><span className="text-gray-500">{log.event_action ?? '-'}</span></td>
-                    <td className="max-w-xl px-3 py-2 font-mono text-xs text-gray-700 break-words"><span className="mr-2 font-sans font-semibold">{log.incident_related ? <span className="text-amber-700">[インシデント取込済み]</span> : <span className="text-gray-400">[未取込]</span>}</span>{log.message}</td>
+                    <td className="max-w-xl px-3 py-2 font-mono text-xs text-gray-700 break-words"><span className="mr-2 font-sans font-semibold">{log.recovery_event ? <span className="text-emerald-700">[復帰イベント]</span> : log.incident_related ? <span className="text-amber-700">[インシデント取込済み]</span> : <span className="text-gray-400">[未取込]</span>}</span>{log.message}</td>
                   </tr>
                 ))}
               </tbody>

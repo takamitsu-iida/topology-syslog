@@ -119,6 +119,7 @@ class RawLogOut(BaseModel):
     event_action: str | None = None
     classification_reasons: list[dict[str, object]]
     incident_related: bool = False
+    recovery_event: bool = False
 
 
 class RawLogListOut(BaseModel):

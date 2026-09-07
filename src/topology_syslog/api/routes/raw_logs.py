@@ -32,7 +32,10 @@ def list_raw_logs(
     incident_logs = {message for incident in incidents for message in incident.raw_logs}
     return RawLogListOut(
         logs=[
-            RawLogOut.model_validate(log).model_copy(update={"incident_related": log.message in incident_logs})
+            RawLogOut.model_validate(log).model_copy(update={
+                "incident_related": log.message in incident_logs,
+                "recovery_event": log.event_classification == "recovery",
+            })
             for log in logs
         ],
         total=len(logs),
