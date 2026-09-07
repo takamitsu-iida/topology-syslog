@@ -108,6 +108,9 @@ def _merge_projected_hypothesis_incident(existing, projected, observation, lifec
     projected.status = existing.status
     projected.last_recovery_at = existing.last_recovery_at
     projected.last_fault_at = existing.last_fault_at
+    projected.parent_incident_id = existing.parent_incident_id
+    projected.child_incident_ids = list(existing.child_incident_ids)
+    projected.relationship_type = existing.relationship_type
     if preserve_existing_root:
         projected.root_cause_object = existing.root_cause_object
         projected.root_cause_node = existing.root_cause_node

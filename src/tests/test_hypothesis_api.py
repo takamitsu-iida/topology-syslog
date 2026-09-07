@@ -220,3 +220,47 @@ def test_hypothesis_ingest_persists_ospf_impact_as_child_incident():
     assert parent["child_incident_ids"] == [child["incident_id"]]
     assert child["parent_incident_id"] == parent["incident_id"]
     assert child["root_cause_object"] == "OSPFSession:Spine1-Leaf2-OSPF"
+
+
+def test_spine1_leaf3_link_creates_ospf_child_and_fully_recovers(tmp_path):
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'ospf-lifecycle.db'}",
+        topology_path="configs/ospf/yang_topology.yaml",
+        topology_source="iida-yaml",
+        recovery_quiet_period_sec=0.01,
+        syslog_port=0,
+    )
+    down = [
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:20.223 Leaf3 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to down"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:21.223 Leaf3 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:21.224 Leaf3 %OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.1 on GigabitEthernet0/0 from FULL to DOWN, Neighbor Down: Interface down or detached"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:19.233 Spine1 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to down"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:20.233 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to down"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:11:20.234 Spine1 %OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.13 on GigabitEthernet0/2 from FULL to DOWN, Neighbor Down: Interface down or detached"},
+    ]
+    up = [
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:20.223 Leaf3 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0, changed state to up"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:21.223 Leaf3 %LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to up"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:21.224 Leaf3 %OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.1 on GigabitEthernet0/0 from LOADING to FULL, Loading Done"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:19.233 Spine1 %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/2, changed state to up"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:20.233 Spine1 %LINK-3-UPDOWN: Interface GigabitEthernet0/2, changed state to up"},
+        {"source_ip": "127.0.0.1", "raw": "<35>Sep 7 06:12:20.234 Spine1 %OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.13 on GigabitEthernet0/2 from LOADING to FULL, Loading Done"},
+    ]
+
+    with TestClient(app) as client:
+        fault_response = client.post("/ingest", json={"messages": down})
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
+        parent = next(incident for incident in incidents if incident["relationship_type"] == "root")
+        child = next(incident for incident in incidents if incident["relationship_type"] == "impact")
+
+        recovery_response = client.post("/ingest", json={"messages": up})
+        time.sleep(0.05)
+        recovered_parent = app.state.store.get_by_id(parent["incident_id"])
+        recovered_child = app.state.store.get_by_id(child["incident_id"])
+
+    assert fault_response.status_code == 200
+    assert parent["child_incident_ids"] == [child["incident_id"]]
+    assert child["root_cause_object"] == "OSPFSession:Spine1-Leaf3-OSPF"
+    assert recovery_response.status_code == 200
+    assert recovered_parent is not None and recovered_parent.condition == "RECOVERED"
+    assert recovered_child is not None and recovered_child.condition == "RECOVERED"

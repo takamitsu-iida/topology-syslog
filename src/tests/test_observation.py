@@ -137,6 +137,22 @@ def test_bgp_adjchange_peer_hostname_becomes_bgp_session_observation():
     assert observation.observed_object == "BGPSession:Spine1-Leaf1-eBGP"
 
 
+def test_ospf_adjchg_reason_does_not_become_interface_named_down():
+    topology = CausalTopology.load_from_iida_yaml("configs/ospf/yang_topology.yaml")
+    message = _msg(
+        "Leaf3",
+        "%OSPF-5-ADJCHG: Process 1, Nbr 10.0.0.1 on GigabitEthernet0/0 "
+        "from FULL to DOWN, Neighbor Down: Interface down or detached",
+    )
+    EventClassifier().classify(message)
+
+    observation = ObservationNormalizer(topology).normalize(message)
+
+    assert observation is not None
+    assert observation.observed_object == "OSPFSession:Spine1-Leaf3-OSPF"
+    assert observation.peer_device == "Spine1"
+
+
 def test_lacp_event_becomes_lacp_session_observation():
     message = _msg("Leaf1", "%LACP-4-PORTCHANNEL: Interface Port-channel1, changed state to down")
     rule = KnowledgeRule(

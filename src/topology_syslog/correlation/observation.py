@@ -81,15 +81,6 @@ class ObservationNormalizer:
             if session is not None:
                 return session, 0.9, None
 
-        if match := _INTERFACE_STATE_RE.search(message.message):
-            interface_id = self._resolve_interface_id(message.hostname, match.group(1))
-            return (
-                self._topology.interface_object(message.hostname, interface_id)
-                or interface_object_id(message.hostname, interface_id),
-                0.95,
-                None,
-            )
-
         if _is_bgp_event(message) and (match := _BGP_NEIGHBOR_RE.search(message.message)):
             peer = self._resolve_peer(match.group(1))
             if peer is not None:
@@ -105,6 +96,15 @@ class ObservationNormalizer:
                 if session is not None:
                     return session, 0.9, peer
             return device_object_id(message.hostname), 0.45, peer
+
+        if match := _INTERFACE_STATE_RE.search(message.message):
+            interface_id = self._resolve_interface_id(message.hostname, match.group(1))
+            return (
+                self._topology.interface_object(message.hostname, interface_id)
+                or interface_object_id(message.hostname, interface_id),
+                0.95,
+                None,
+            )
 
         if match := _INTERFACE_RE.search(message.message):
             interface_id = self._resolve_interface_id(message.hostname, match.group(1))
