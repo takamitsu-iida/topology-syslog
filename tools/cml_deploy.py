@@ -8,7 +8,7 @@
   CML_VERIFY_SSL  "false" にすると SSL 検証をスキップ (自己署名証明書向け)
 
 使い方:
-  python tools/cml_deploy.py deploy [cml_lab.yaml]   # インポート & 起動
+    python tools/cml_deploy.py deploy [clos|ospf]      # インポート & 起動
   python tools/cml_deploy.py deploy --no-start ...    # インポートのみ
   python tools/cml_deploy.py ls                       # ラボ一覧
   python tools/cml_deploy.py status <lab-id>          # ステータス確認
@@ -300,9 +300,11 @@ def cmd_ls(client: httpx.Client, token: str, _args: argparse.Namespace) -> int:
 # メインエントリー
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TOPOLOGY = str(
-    Path(__file__).parent.parent / "configs" / "clos" / "cml_lab.yaml"
-)
+_CONFIGS_DIR = Path(__file__).parent.parent / "configs"
+_TOPOLOGIES = {
+    "clos": _CONFIGS_DIR / "clos" / "cml_lab.yaml",
+    "ospf": _CONFIGS_DIR / "ospf" / "cml_lab.yaml",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -328,8 +330,8 @@ def build_parser() -> argparse.ArgumentParser:
     # deploy
     dp = sub.add_parser("deploy", help="topology をインポートして起動する")
     dp.add_argument(
-        "topology", nargs="?", default=_DEFAULT_TOPOLOGY,
-        help=f"cml_lab.yaml のパス (デフォルト: {_DEFAULT_TOPOLOGY})",
+        "topology", nargs="?", choices=tuple(_TOPOLOGIES), default="clos",
+        help="ルーティング方式 (デフォルト: clos)",
     )
     dp.add_argument("--no-start", action="store_true",
                     help="インポートのみ (起動しない)")
@@ -359,6 +361,9 @@ def main() -> int:
     if args.command is None:
         parser.print_help()
         return 0
+
+    if args.command == "deploy":
+        args.topology = str(_TOPOLOGIES[args.topology])
 
     # 接続情報の解決 (CLI引数 > 環境変数)
     url      = args.url      or os.environ.get("CML_URL")
