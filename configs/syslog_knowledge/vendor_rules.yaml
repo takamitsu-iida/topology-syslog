@@ -109,6 +109,42 @@ rules:
     confidence: 0.85
     priority: 80
 
+  - id: cisco-nxos-ospf-adjacency-down
+    description: "Cisco NX-OS の OSPF 隣接断。上流リンクまたは対向ルーター障害の二次影響として扱う。"
+    vendor: cisco-ios
+    signature: "%OSPF-*-ADJCHG*DOWN*"
+    classification: ospf-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip ospf neighbors"
+      - "show ip ospf interface <interface>"
+      - "show ip route ospf"
+    status: approved
+    confidence: 0.85
+    priority: 105
+
+  - id: cisco-nxos-ospf-adjacency-full
+    description: "Cisco NX-OS の OSPF 隣接復旧。復旧証跡として保持し、新規インシデントは作成しない。"
+    vendor: cisco-ios
+    signature: "%OSPF-*-ADJCHG*FULL*"
+    classification: recovery
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip ospf neighbors"
+      - "show ip route ospf"
+    status: approved
+    confidence: 0.85
+    priority: 105
+
   # Juniper Junos ----------------------------------------------------------
   - id: junos-bgp-neighbor-down
     description: "Juniper Junos の BGP neighbor down。上流リンクまたは対向装置障害の二次影響として扱う。"
@@ -125,6 +161,42 @@ rules:
       - "show route protocol bgp"
     status: approved
     confidence: 0.85
+    priority: 90
+
+  - id: junos-ospf-neighbor-down
+    description: "Juniper Junos の OSPF 隣接断。上流リンクまたは対向ルーター障害の二次影響として扱う。"
+    vendor: juniper-junos
+    signature: "RPD_OSPF_NBRDOWN*"
+    classification: ospf-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ospf neighbor"
+      - "show ospf interface"
+      - "show route protocol ospf"
+    status: approved
+    confidence: 0.8
+    priority: 90
+
+  - id: junos-ospf-neighbor-up
+    description: "Juniper Junos の OSPF 隣接復旧。復旧証跡として保持し、新規インシデントは作成しない。"
+    vendor: juniper-junos
+    signature: "RPD_OSPF_NBRUP*"
+    classification: recovery
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ospf neighbor"
+      - "show route protocol ospf"
+    status: approved
+    confidence: 0.8
     priority: 90
 
   - id: junos-link-down
@@ -176,6 +248,42 @@ rules:
       - "show logging | include BGP"
     status: approved
     confidence: 0.85
+    priority: 85
+
+  - id: arista-ospf-neighbor-down
+    description: "Arista EOS の OSPF 隣接断。上流リンクまたは対向ルーター障害の二次影響として扱う。"
+    vendor: arista-eos
+    signature: "%OSPF-*-NEIGHBOR*DOWN*"
+    classification: ospf-adjacency-change
+    correlation_role: secondary-impact
+    severity_policy:
+      "0-2": page_immediately
+      "3-4": create_incident
+      "5": correlate_only
+      "6-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip ospf neighbor"
+      - "show ip ospf interface"
+      - "show ip route ospf"
+    status: approved
+    confidence: 0.8
+    priority: 85
+
+  - id: arista-ospf-neighbor-full
+    description: "Arista EOS の OSPF 隣接復旧。復旧証跡として保持し、新規インシデントは作成しない。"
+    vendor: arista-eos
+    signature: "%OSPF-*-NEIGHBOR*FULL*"
+    classification: recovery
+    correlation_role: informational
+    severity_policy:
+      "0-7": retain_only
+    dedup_window_sec: 180
+    runbook:
+      - "show ip ospf neighbor"
+      - "show ip route ospf"
+    status: approved
+    confidence: 0.8
     priority: 85
 
   - id: arista-interface-down
