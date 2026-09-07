@@ -2,7 +2,7 @@
 
 This graph is separate from the legacy device-level GraphEngine.  It models
 objects that can independently become root-cause candidates: devices,
-interfaces, physical links, and BGP sessions.
+interfaces, physical links, and routing-protocol sessions.
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ class CausalTopology:
     interfaces: dict[tuple[str, str], str] = field(default_factory=dict)
     interface_links: dict[tuple[str, str], str] = field(default_factory=dict)
     bgp_sessions: dict[frozenset[str], str] = field(default_factory=dict)
+    ospf_sessions: dict[frozenset[str], str] = field(default_factory=dict)
     device_addresses: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -109,6 +110,24 @@ class CausalTopology:
             for link_object in topology.links_between(endpoints[0], endpoints[1]):
                 topology.graph.add_edge(link_object, session_object, relation="link-affects-session")
 
+        for session in l3.get("ospf-session", []):
+            endpoints = [endpoint.get("device-id") for endpoint in session.get("endpoint", [])]
+            if len(endpoints) != 2 or any(endpoint not in topology.devices for endpoint in endpoints):
+                continue
+            session_object = ospf_session_object_id(session.get("session-id") or "--".join(sorted(endpoints)))
+            topology.ospf_sessions[frozenset(endpoints)] = session_object
+            topology.graph.add_node(
+                session_object,
+                object_type="ospf-session",
+                session_id=session.get("session-id"),
+                ospf_type=session.get("type", "broadcast"),
+                devices=tuple(endpoints),
+            )
+            for device_id in endpoints:
+                topology.graph.add_edge(device_object_id(device_id), session_object, relation="device-affects-session")
+            for link_object in topology.links_between(endpoints[0], endpoints[1]):
+                topology.graph.add_edge(link_object, session_object, relation="link-affects-session")
+
         return topology
 
     def object_type(self, object_id: str) -> str:
@@ -132,6 +151,9 @@ class CausalTopology:
 
     def bgp_session_for_devices(self, device_a: str, device_b: str) -> str | None:
         return self.bgp_sessions.get(frozenset({device_a, device_b}))
+
+    def ospf_session_for_devices(self, device_a: str, device_b: str) -> str | None:
+        return self.ospf_sessions.get(frozenset({device_a, device_b}))
 
     def resolve_device_by_address(self, address: str) -> str | None:
         return self.device_addresses.get(address)
@@ -184,6 +206,10 @@ def physical_link_object_id(endpoint_a: InterfaceEndpoint, endpoint_b: Interface
 
 def bgp_session_object_id(session_id: str) -> str:
     return f"BGPSession:{session_id}"
+
+
+def ospf_session_object_id(session_id: str) -> str:
+    return f"OSPFSession:{session_id}"
 
 
 def _parse_endpoint(connection: dict, endpoint: dict) -> InterfaceEndpoint:

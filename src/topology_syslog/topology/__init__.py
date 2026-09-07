@@ -4,6 +4,7 @@ from topology_syslog.topology.causal_topology import (
 	bgp_session_object_id,
 	device_object_id,
 	interface_object_id,
+	ospf_session_object_id,
 	physical_link_object_id,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
 	"bgp_session_object_id",
 	"device_object_id",
 	"interface_object_id",
+	"ospf_session_object_id",
 	"physical_link_object_id",
 ]

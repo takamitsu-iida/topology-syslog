@@ -134,7 +134,7 @@ def _child_incident_from_impact(parent, projected, impact_object: str):
 async def _persist_impact_children(app: FastAPI, parent, projected) -> None:
     impact_objects = projected.rca_explanation.impact_objects
     for impact_object in impact_objects:
-        if not impact_object.startswith("BGPSession:"):
+        if not impact_object.startswith(("BGPSession:", "OSPFSession:")):
             continue
         existing_child = await asyncio.to_thread(
             app.state.store.find_child_incident,

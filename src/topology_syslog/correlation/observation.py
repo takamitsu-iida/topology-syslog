@@ -15,6 +15,10 @@ _BGP_NEIGHBOR_RE = re.compile(
     r"\bneighbor\s+(\S+).*\b(?:down|up|reset|hold time expired|removed from session)\b",
     re.IGNORECASE,
 )
+_OSPF_NEIGHBOR_RE = re.compile(
+    r"\b(?:neighbor|nbr)\s+(\S+).*\b(?:down|up|full|from\s+\S+\s+to\s+\S+)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,14 @@ class ObservationNormalizer:
                     return session, 0.9, peer
             return device_object_id(message.hostname), 0.45, peer
 
+        if _is_ospf_event(message) and (match := _OSPF_NEIGHBOR_RE.search(message.message)):
+            peer = self._resolve_peer(match.group(1))
+            if peer is not None:
+                session = self._topology.ospf_session_for_devices(message.hostname, peer)
+                if session is not None:
+                    return session, 0.9, peer
+            return device_object_id(message.hostname), 0.45, peer
+
         if match := _INTERFACE_RE.search(message.message):
             interface_id = self._resolve_interface_id(message.hostname, match.group(1))
             interface_object = self._topology.interface_object(message.hostname, interface_id)
@@ -105,6 +117,11 @@ class ObservationNormalizer:
 def _is_bgp_event(message: SyslogMessage) -> bool:
     signature = message.normalized_signature or message.event_type or ""
     return "%BGP" in signature.upper() or "%BGP" in message.message.upper()
+
+
+def _is_ospf_event(message: SyslogMessage) -> bool:
+    signature = message.normalized_signature or message.event_type or ""
+    return "%OSPF" in signature.upper() or "%OSPF" in message.message.upper() or "RPD_OSPF" in message.message.upper()
 
 
 def _assertion_for(message: SyslogMessage) -> str:

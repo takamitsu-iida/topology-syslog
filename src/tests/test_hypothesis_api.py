@@ -152,3 +152,28 @@ def test_hypothesis_ingest_persists_bgp_impact_as_child_incident():
     assert parent["child_incident_ids"] == [child["incident_id"]]
     assert child["parent_incident_id"] == parent["incident_id"]
     assert child["root_cause_object"].startswith("BGPSession:")
+
+
+def test_hypothesis_ingest_persists_ospf_impact_as_child_incident():
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path="configs/ospf/yang_topology.yaml",
+        topology_source="iida-yaml",
+        syslog_port=0,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [
+            {
+                "source_ip": "127.0.0.1",
+                "raw": "<35>Sep 5 08:13:06.021 Leaf2 %OSPF-5-ADJCHG: Process 1, Nbr 10.1.12.1 on GigabitEthernet0/0 from FULL to DOWN",
+            },
+        ]})
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
+
+    assert response.status_code == 200
+    parent = next(incident for incident in incidents if incident["relationship_type"] == "root")
+    child = next(incident for incident in incidents if incident["relationship_type"] == "impact")
+    assert parent["child_incident_ids"] == [child["incident_id"]]
+    assert child["parent_incident_id"] == parent["incident_id"]
+    assert child["root_cause_object"] == "OSPFSession:Spine1-Leaf2-OSPF"

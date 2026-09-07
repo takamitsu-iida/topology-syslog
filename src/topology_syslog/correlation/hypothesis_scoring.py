@@ -184,11 +184,11 @@ class HypothesisScorer:
             return 0.0
         all_sessions = {
             successor for successor in self._topology.graph.successors(candidate)
-            if self._topology.object_type(successor) == "bgp-session"
+            if self._topology.object_type(successor) in {"bgp-session", "ospf-session"}
         }
         covered_sessions = {
             observation.observed_object for observation in observations
-            if self._topology.object_type(observation.observed_object) == "bgp-session"
+            if self._topology.object_type(observation.observed_object) in {"bgp-session", "ospf-session"}
         }
         if len(all_sessions) <= 1 or not covered_sessions:
             return 0.0
