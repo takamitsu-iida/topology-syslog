@@ -134,7 +134,7 @@ def _child_incident_from_impact(parent, projected, impact_object: str):
     return child
 
 
-async def _persist_impact_children(app: FastAPI, parent, projected) -> None:
+async def _persist_impact_children(app: FastAPI, parent, projected, observation) -> None:
     impact_objects = projected.rca_explanation.impact_objects
     for impact_object in impact_objects:
         if not impact_object.startswith(("BGPSession:", "OSPFSession:", "LACPSession:")):
@@ -145,6 +145,9 @@ async def _persist_impact_children(app: FastAPI, parent, projected) -> None:
             impact_object,
         )
         if existing_child is not None:
+            event = app.state.hypothesis_lifecycle.apply_fault(existing_child, observation)
+            if event.incident is not None:
+                await asyncio.to_thread(app.state.store.update, event.incident)
             continue
         child = _child_incident_from_impact(parent, projected, impact_object)
         if child.incident_id in parent.child_incident_ids:
@@ -256,7 +259,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
         if existing is not None:
             incident = _merge_projected_hypothesis_incident(existing, incident, observation, lifecycle)
             if await asyncio.to_thread(app.state.store.update, incident):
-                await _persist_impact_children(app, incident, projected.incident)
+                await _persist_impact_children(app, incident, projected.incident, observation)
                 await asyncio.to_thread(
                     app.state.store.record_rca_evaluation,
                     incident.incident_id,
@@ -285,7 +288,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     if matching_open is not None:
         incident = _merge_projected_hypothesis_incident(matching_open, incident, observation, lifecycle)
         if await asyncio.to_thread(app.state.store.update, incident):
-            await _persist_impact_children(app, incident, projected.incident)
+            await _persist_impact_children(app, incident, projected.incident, observation)
             app.state.hypothesis_active_incident_id = incident.incident_id
             app.state.hypothesis_active_root_object = update.current_root_cause_object
             event = NotificationEvent.UPDATED
@@ -306,7 +309,7 @@ async def _process_message_hypothesis(app: FastAPI, msg, rule, classification_re
     )
     lifecycle.apply_fault(incident, observation)
     await asyncio.to_thread(app.state.store.save, incident)
-    await _persist_impact_children(app, incident, projected.incident)
+    await _persist_impact_children(app, incident, projected.incident, observation)
     app.state.hypothesis_active_incident_id = incident.incident_id
     app.state.hypothesis_active_root_object = update.current_root_cause_object
     if app.state.vigil_notifier is not None:

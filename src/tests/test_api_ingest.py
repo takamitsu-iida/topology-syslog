@@ -1,6 +1,8 @@
 """POST /ingest および WebSocket エンドポイントのテスト。"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,7 +10,7 @@ from topology_syslog.api.main import _process_message_immediately, create_app
 from topology_syslog.correlation.root_cause_inferencer import RootCauseInferencer
 from topology_syslog.ingestion.file_ingest import run_batch
 from topology_syslog.ingestion.syslog_parser import parse
-from topology_syslog.models import EventClassification, EventClassificationResult
+from topology_syslog.models import EventClassification, EventClassificationResult, Incident
 from topology_syslog.persistence.incident_store import IncidentStore
 
 # RFC 3164 形式のテスト用シスログ行

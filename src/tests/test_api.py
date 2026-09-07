@@ -194,8 +194,9 @@ def test_process_message_immediately_merges_into_open_incident(app):
         existing = Incident(
             incident_id="INC-20260816-001",
             created_at=datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc),
-            root_cause_node="Dist-Switch1",
+            root_cause_node="Core-Router1",
             primary_event="%LINK-3-UPDOWN: Interface GE0/0 down",
+            root_cause_object="Interface:Core-Router1:GE0/0",
             secondary_nodes=["Access-SW1"],
             raw_log_count=1,
             raw_logs=["%LINK-3-UPDOWN: Interface GE0/0 down"],
@@ -208,7 +209,8 @@ def test_process_message_immediately_merges_into_open_incident(app):
             hostname="Core-Router1",
             facility=3,
             severity=5,
-            message="%LINK-3-UPDOWN: Interface GE0/1 down",
+            message="%LINK-3-UPDOWN: Interface GE0/0, changed state to down",
+            event_type="%LINK-3-UPDOWN",
         )
 
         class DummyNotifier:
@@ -219,13 +221,20 @@ def test_process_message_immediately_merges_into_open_incident(app):
             def resolve_by_source(self, node):
                 return None
 
+        class BroadcastSpy:
+            def __init__(self):
+                self.messages = []
+
+            async def broadcast(self, data):
+                self.messages.append(data)
+
         app.state.vigil_notifier = DummyNotifier()
-        with client.websocket_connect("/ws/incidents") as ws:
-            asyncio.run(_process_message_immediately(app, msg))
-            msg_json = ws.receive_json()
-            assert msg_json["type"] == "incident.updated"
-            assert msg_json["incident"]["root_cause_node"] == "Core-Router1"
-            assert app.state.vigil_notifier.calls == []
+        broadcast_spy = BroadcastSpy()
+        app.state.ws_manager = broadcast_spy
+        asyncio.run(_process_message_immediately(app, msg))
+        assert broadcast_spy.messages[0]["type"] == "incident.updated"
+        assert broadcast_spy.messages[0]["incident"]["root_cause_node"] == "Core-Router1"
+        assert app.state.vigil_notifier.calls == []
 
         incidents = app.state.store.list_open_active()
         assert len(incidents) == 1

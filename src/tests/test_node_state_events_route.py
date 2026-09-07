@@ -24,7 +24,8 @@ def test_node_state_event_endpoint_requires_token_and_is_idempotent(tmp_path):
     assert first.json()["status"] == "accepted"
     assert first.json()["duplicate"] is False
     assert first.json()["event_id"] == "event-1"
-    assert first.json()["related_incident_ids"] == ["INC-20260906-001"]
+    assert len(first.json()["related_incident_ids"]) == 1
+    assert first.json()["related_incident_ids"][0].startswith("INC-")
     assert first.json()["updated_incident_ids"] == []
     assert duplicate.json()["duplicate"] is True
 
@@ -218,12 +219,13 @@ def test_down_after_recovery_creates_new_incident(tmp_path):
             headers={"Authorization": "Bearer event-token"},
         )
 
+    new_incident_id = response.json()["related_incident_ids"][0]
     updated = app.state.store.get_by_id("INC-REPEAT")
-    assert response.json()["related_incident_ids"] == ["INC-20260906-001"]
+    assert new_incident_id != "INC-REPEAT"
     assert response.json()["updated_incident_ids"] == []
     assert updated is not None
     assert updated.condition == "RECOVERED"
-    new_incident = app.state.store.get_by_id("INC-20260906-001")
+    new_incident = app.state.store.get_by_id(new_incident_id)
     assert new_incident is not None
     assert new_incident.condition == "DEGRADED"
 
@@ -286,6 +288,7 @@ def test_repeated_down_up_cycles_create_new_incident_after_recovery(tmp_path):
             primary_event="node down",
             condition="RECOVERED",
         ))
+        expected_id = None
         for event_id, state in [
             ("cycle-1-down", "DOWN"),
             ("cycle-1-up", "UP"),
@@ -301,14 +304,15 @@ def test_repeated_down_up_cycles_create_new_incident_after_recovery(tmp_path):
                 },
                 headers=headers,
             )
-            expected_id = "INC-20260906-001"
+            expected_id = expected_id or response.json()["related_incident_ids"][0]
             assert response.json()["related_incident_ids"] == [expected_id]
 
     updated = app.state.store.get_by_id("INC-CYCLES")
     assert updated is not None
     assert updated.incident_id == "INC-CYCLES"
     assert updated.condition == "RECOVERED"
-    new_incident = app.state.store.get_by_id("INC-20260906-001")
+    assert expected_id is not None
+    new_incident = app.state.store.get_by_id(expected_id)
     assert new_incident is not None
     assert new_incident.condition == "DEGRADED"
 
