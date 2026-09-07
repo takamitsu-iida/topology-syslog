@@ -1,11 +1,11 @@
-# Hypothesis-Based RCA 実装計画
+# Hypothesis-Based RCA 設計
 
-> 作成日: 2026-09-05
-> 目的: 現行の「SYSLOG受信ごとにIncidentを即時生成・統合する方式」から切り離し、トポロジー依存グラフ上で Observation を集約し、根本原因 Hypothesis を採点して Incident に投影する新方式を段階的に実装する。
+> 更新日: 2026-09-07
+> 目的: 現行の Hypothesis-Based RCA の設計、実装判断、検証履歴を記録する。SYSLOG を Observation として集約し、トポロジー依存グラフ上の根本原因 Hypothesis を採点して Incident に投影する。
 
 ---
 
-## 1. 方針
+## 1. 設計方針
 
 新方式では、SYSLOG を直接 Incident に変換しない。まず観測事実として `Observation` に正規化し、トポロジー上の原因候補を `Hypothesis` として生成・採点し、最後に `RCAResult` または `Incident` へ投影する。
 

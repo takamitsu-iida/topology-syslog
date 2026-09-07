@@ -10,6 +10,14 @@ RCA は **Hypothesis-Based RCA** で動作します。`make start`、Docker Comp
 
 従来の SYSLOG サーバーはログを保存するだけで、障害がどこから波及したかを理解できません。たとえば 1 本の物理リンク断や 1 台の Spine 障害から、複数装置の BGP down、interface down、到達性エラーが連鎖しても、運用者は大量のログから原因を探す必要があります。
 
+## コンセプト
+
+topology-syslog は、アラートストームを根本原因単位のインシデントへ集約する、トポロジー駆動の監視プラットフォームです。ネットワークの接続関係と SYSLOG の観測事実を結び付け、運用者が個々のログを追跡する代わりに、障害の原因と影響範囲を判断できる状態を目指します。
+
+トポロジーは YANG 形式で管理し、推論結果は既存の Incident、通知、UI に投影します。これにより、単にログを保存するのではなく、障害の因果関係を説明可能な形で提示します。
+
+## 方式
+
 topology-syslog は、YANG 形式のトポロジーを原因推論用グラフとしてロードし、SYSLOG を観測事実 `Observation` に正規化します。その後、根本原因候補 `Hypothesis` を採点し、最も説明力の高い候補を `Incident` に投影します。
 
 ```text
@@ -497,8 +505,6 @@ pytest -q \
 
 | ファイル | 内容 |
 |---|---|
-| [README.hypothesis-rca.md](README.hypothesis-rca.md) | 新方式の実装計画と進捗 |
-| [README.concept.md](README.concept.md) | 初期コンセプト |
-| [README.implementation.md](README.implementation.md) | 旧実装計画の履歴 |
+| [README.hypothesis-rca.md](README.hypothesis-rca.md) | Hypothesis-Based RCA の詳細設計、実装判断、検証履歴 |
 | [configs/syslog_knowledge/README.md](configs/syslog_knowledge/README.md) | SKB ルール運用 |
 | [yang/README.md](yang/README.md) | YANG モデル概要 |
