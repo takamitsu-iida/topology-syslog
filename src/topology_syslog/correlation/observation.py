@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 
 from topology_syslog.knowledge.store import KnowledgeRule
@@ -47,8 +48,12 @@ class ObservationNormalizer:
         self._topology = topology
 
     def normalize(self, message: SyslogMessage, rule: KnowledgeRule | None = None) -> Observation | None:
-        if message.hostname not in self._topology.devices:
+        hostname = message.hostname
+        if hostname not in self._topology.devices:
+            hostname = self._topology.resolve_device_by_address(message.source_ip) or hostname
+        if hostname not in self._topology.devices:
             return None
+        message = replace(message, hostname=hostname)
 
         observed_object, object_confidence, peer_device = self._observed_object(message)
         assertion = _assertion_for(message)

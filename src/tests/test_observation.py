@@ -7,7 +7,13 @@ from topology_syslog.models import EventAction, EventClassification, SyslogMessa
 from topology_syslog.topology.causal_topology import CausalTopology
 
 
-def _msg(hostname: str, message: str, *, is_recovery: bool = False) -> SyslogMessage:
+def _msg(
+    hostname: str,
+    message: str,
+    *,
+    source_ip: str = "10.0.0.1",
+    is_recovery: bool = False,
+) -> SyslogMessage:
     event_type = None
     if "%LINK-3-UPDOWN" in message:
         event_type = "%LINK-3-UPDOWN"
@@ -15,7 +21,7 @@ def _msg(hostname: str, message: str, *, is_recovery: bool = False) -> SyslogMes
         event_type = "%BGP-5-ADJCHANGE"
     return SyslogMessage(
         received_at=datetime.now(tz=timezone.utc),
-        source_ip="10.0.0.1",
+        source_ip=source_ip,
         hostname=hostname,
         facility=3,
         severity=3,
@@ -88,6 +94,16 @@ def test_link_updown_syslog_becomes_interface_fault_observation():
     assert observation.action == EventAction.CREATE_INCIDENT.value
     assert observation.knowledge_id == "link-down"
     assert observation.confidence == 0.95
+
+
+def test_source_ip_resolves_syslog_without_topology_hostname():
+    message = _msg("10.0.0.1", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0, changed state to down")
+
+    observation = ObservationNormalizer(_topology()).normalize(message)
+
+    assert observation is not None
+    assert observation.source_node == "Spine1"
+    assert observation.observed_object == "Interface:Spine1:GigabitEthernet0/0"
 
 
 def test_bgp_adjchange_peer_ip_becomes_bgp_session_observation():
@@ -201,6 +217,10 @@ def test_recovery_syslog_becomes_recovery_observation():
 
 
 def test_unknown_host_does_not_create_observation():
-    message = _msg("Unknown", "%LINK-3-UPDOWN: Interface GigabitEthernet0/0 down")
+    message = _msg(
+        "Unknown",
+        "%LINK-3-UPDOWN: Interface GigabitEthernet0/0 down",
+        source_ip="192.0.2.99",
+    )
 
     assert ObservationNormalizer(_topology()).normalize(message) is None
