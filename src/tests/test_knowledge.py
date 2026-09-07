@@ -721,6 +721,22 @@ def test_knowledge_review_creates_approves_and_disables_rule(tmp_path):
         assert client.post("/knowledge/rules/reviewed-event/disable").json()["status"] == "disabled"
 
 
+def test_knowledge_reload_refreshes_rules_from_disk(tmp_path):
+    rules_path = tmp_path / "rules.yaml"
+    rules_path.write_text(yaml.safe_dump({"rules": [{"id": "initial", "signature": "%INITIAL-*"}]}))
+    app = create_app(
+        database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0,
+    )
+    with TestClient(app) as client:
+        rules_path.write_text(yaml.safe_dump({"rules": [{"id": "reloaded", "signature": "%RELOADED-*"}]}))
+
+        response = client.post("/knowledge/reload")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "reloaded", "rules": 1}
+        assert client.get("/knowledge/rules").json()[0]["rule_id"] == "reloaded"
+
+
 def test_knowledge_audit_tracks_rule_changes_applications_and_rollback(tmp_path):
     rules_path = tmp_path / "rules.yaml"
     app = create_app(database_url="sqlite:///:memory:", knowledge_path=str(rules_path), syslog_port=0)

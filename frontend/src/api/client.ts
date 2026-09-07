@@ -72,6 +72,9 @@ export const listNodeStates = (): Promise<NodeStateRecord[]> => get<NodeStateRec
 export const reloadTopology = (): Promise<{ status: string; nodes: number; edges: number }> =>
   post('/topology/reload')
 
+export const reloadKnowledge = (): Promise<{ status: string; rules: number }> =>
+  post('/knowledge/reload')
+
 export const getFilterPatterns = (): Promise<FilterPatternsResponse> =>
   get<FilterPatternsResponse>('/filter/patterns')
 

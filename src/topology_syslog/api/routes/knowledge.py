@@ -51,6 +51,13 @@ def list_rules(request: Request) -> list[KnowledgeRuleOut]:
     return [KnowledgeRuleOut.model_validate(rule) for rule in store.rules]
 
 
+@router.post("/reload")
+def reload_knowledge(request: Request) -> dict[str, str | int]:
+    store = _get_knowledge_store(request)
+    store.reload()
+    return {"status": "reloaded", "rules": len(store.rules)}
+
+
 @router.post("/rules", response_model=KnowledgeRuleOut, status_code=201)
 def create_rule(payload: KnowledgeRuleCreate, request: Request) -> KnowledgeRuleOut:
     store = _get_knowledge_store(request)

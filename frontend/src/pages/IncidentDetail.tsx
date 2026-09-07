@@ -158,7 +158,7 @@ export function IncidentDetail() {
       {/* 概要カード */}
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs text-gray-400">根本原因</p>
+          <p className="text-xs text-gray-400">根本原因オブジェクト</p>
           <p className="mt-0.5 font-semibold text-red-600">{incident.root_cause_object ?? incident.root_cause_node}</p>
         </div>
         <div className="rounded-lg border bg-white p-3 shadow-sm">
@@ -275,8 +275,16 @@ export function IncidentDetail() {
         {primaryRca ? (
           <div className="mt-3 space-y-3">
             <div className="rounded border bg-gray-50 p-3">
-              <p className="text-xs text-gray-400">根本原因候補</p>
+              <p className="text-xs text-gray-400">RCA最有力ノード候補</p>
               <p className="mt-0.5 font-semibold text-gray-800">{primaryRca.node_id}</p>
+              <p className="mt-1 text-xs text-gray-500">
+                根本原因オブジェクトを構成・代表する装置ノードです。
+              </p>
+              {incident.root_cause_object && (
+                <p className="mt-1 text-xs text-gray-500">
+                  選定済みオブジェクト: <span className="font-mono">{incident.root_cause_object}</span>
+                </p>
+              )}
             </div>
             {primaryRca.evidences.length > 0 && (
               <div>

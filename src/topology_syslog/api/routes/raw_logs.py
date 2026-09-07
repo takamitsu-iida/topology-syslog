@@ -28,7 +28,15 @@ def list_raw_logs(
         action=action,
         knowledge_status=knowledge_status,
     )
-    return RawLogListOut(logs=[RawLogOut.model_validate(log) for log in logs], total=len(logs))
+    incidents = request.app.state.store.list_incidents(include_children=True)
+    incident_logs = {message for incident in incidents for message in incident.raw_logs}
+    return RawLogListOut(
+        logs=[
+            RawLogOut.model_validate(log).model_copy(update={"incident_related": log.message in incident_logs})
+            for log in logs
+        ],
+        total=len(logs),
+    )
 
 
 @router.delete("", response_model=dict[str, int])

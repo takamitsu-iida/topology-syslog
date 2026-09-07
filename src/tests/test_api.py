@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from topology_syslog.api.main import _process_message_immediately, create_app
+from topology_syslog.ingestion.syslog_parser import parse
 from topology_syslog.models import Incident, RCAEvidence, RCAExplanation, RCACandidate, SyslogMessage
 
 
@@ -50,6 +51,23 @@ def test_list_incidents_filter_by_status(client, app):
     body = resp.json()
     assert body["total"] == 1
     assert body["incidents"][0]["status"] == "OPEN"
+
+
+def test_raw_logs_identify_logs_included_in_incidents(client, app):
+    included_message = "%LINK-3-UPDOWN: Interface GE0/0 down"
+    excluded_message = "%SYS-5-CONFIG_I: changed"
+    app.state.raw_log_store.record(parse(f"<34>Aug 16 10:00:00 r1 {included_message}".encode(), "10.0.0.1"))
+    app.state.raw_log_store.record(parse(f"<34>Aug 16 10:00:01 r1 {excluded_message}".encode(), "10.0.0.1"))
+    incident = _make_inc()
+    incident.raw_logs = [included_message]
+    app.state.store.save(incident)
+
+    response = client.get("/raw-logs")
+
+    assert response.status_code == 200
+    logs_by_message = {log["message"]: log for log in response.json()["logs"]}
+    assert logs_by_message[included_message]["incident_related"] is True
+    assert logs_by_message[excluded_message]["incident_related"] is False
 
 
 # ---- /incidents/{id} ---------------------------------------------------
