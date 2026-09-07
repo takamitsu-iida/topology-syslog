@@ -39,6 +39,7 @@ class CausalTopology:
     interface_links: dict[tuple[str, str], str] = field(default_factory=dict)
     bgp_sessions: dict[frozenset[str], str] = field(default_factory=dict)
     ospf_sessions: dict[frozenset[str], str] = field(default_factory=dict)
+    lacp_sessions: dict[tuple[str, str], str] = field(default_factory=dict)
     device_addresses: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -128,6 +129,34 @@ class CausalTopology:
             for link_object in topology.links_between(endpoints[0], endpoints[1]):
                 topology.graph.add_edge(link_object, session_object, relation="link-affects-session")
 
+        for session in l3.get("lacp-session", []):
+            endpoints = [
+                InterfaceEndpoint(endpoint.get("device-id"), endpoint.get("interface-id"))
+                for endpoint in session.get("endpoint", [])
+                if endpoint.get("device-id") and endpoint.get("interface-id")
+            ]
+            if not endpoints or any(endpoint.device_id not in topology.devices for endpoint in endpoints):
+                continue
+            session_object = lacp_session_object_id(
+                session.get("session-id") or "--".join(
+                    f"{endpoint.device_id}-{endpoint.interface_id}" for endpoint in endpoints
+                )
+            )
+            for endpoint in endpoints:
+                topology.lacp_sessions[(endpoint.device_id, endpoint.interface_id)] = session_object
+            topology.graph.add_node(
+                session_object,
+                object_type="lacp-session",
+                session_id=session.get("session-id"),
+                devices=tuple(endpoint.device_id for endpoint in endpoints),
+                interfaces=tuple(f"{endpoint.device_id}:{endpoint.interface_id}" for endpoint in endpoints),
+            )
+            for device_id in {endpoint.device_id for endpoint in endpoints}:
+                topology.graph.add_edge(device_object_id(device_id), session_object, relation="device-affects-session")
+            if len(endpoints) == 2:
+                for link_object in topology.links_between(endpoints[0].device_id, endpoints[1].device_id):
+                    topology.graph.add_edge(link_object, session_object, relation="link-affects-session")
+
         return topology
 
     def object_type(self, object_id: str) -> str:
@@ -154,6 +183,9 @@ class CausalTopology:
 
     def ospf_session_for_devices(self, device_a: str, device_b: str) -> str | None:
         return self.ospf_sessions.get(frozenset({device_a, device_b}))
+
+    def lacp_session_for_interface(self, device_id: str, interface_id: str) -> str | None:
+        return self.lacp_sessions.get((device_id, interface_id))
 
     def resolve_device_by_address(self, address: str) -> str | None:
         return self.device_addresses.get(address)
@@ -210,6 +242,10 @@ def bgp_session_object_id(session_id: str) -> str:
 
 def ospf_session_object_id(session_id: str) -> str:
     return f"OSPFSession:{session_id}"
+
+
+def lacp_session_object_id(session_id: str) -> str:
+    return f"LACPSession:{session_id}"
 
 
 def _parse_endpoint(connection: dict, endpoint: dict) -> InterfaceEndpoint:

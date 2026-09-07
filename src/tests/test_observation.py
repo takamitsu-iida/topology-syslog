@@ -58,6 +58,10 @@ def _topology() -> CausalTopology:
                     "type": "ebgp",
                     "endpoint": [{"device-id": "Spine1"}, {"device-id": "Leaf1"}],
                 }],
+                "lacp-session": [{
+                    "session-id": "Leaf1-Port-channel1",
+                    "endpoint": [{"device-id": "Leaf1", "interface-id": "Port-channel1"}],
+                }],
             },
         }
     })
@@ -115,6 +119,26 @@ def test_bgp_adjchange_peer_hostname_becomes_bgp_session_observation():
 
     assert observation is not None
     assert observation.observed_object == "BGPSession:Spine1-Leaf1-eBGP"
+
+
+def test_lacp_event_becomes_lacp_session_observation():
+    message = _msg("Leaf1", "%LACP-4-PORTCHANNEL: Interface Port-channel1, changed state to down")
+    rule = KnowledgeRule(
+        rule_id="lacp-down",
+        signature="%LACP-*-*",
+        classification="lacp-state-change",
+        correlation_role="secondary-impact",
+        severity_policy={"0-7": "correlate_only"},
+        confidence=0.9,
+    )
+    EventClassifier().classify(message, rule)
+
+    observation = ObservationNormalizer(_topology()).normalize(message, rule)
+
+    assert observation is not None
+    assert observation.observed_object == "LACPSession:Leaf1-Port-channel1"
+    assert observation.assertion == "state_change"
+    assert observation.action == EventAction.CORRELATE_ONLY.value
 
 
 def test_unknown_syslog_becomes_low_confidence_device_fault_observation():

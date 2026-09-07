@@ -19,6 +19,10 @@ _OSPF_NEIGHBOR_RE = re.compile(
     r"\b(?:neighbor|nbr)\s+(\S+).*\b(?:down|up|full|from\s+\S+\s+to\s+\S+)\b",
     re.IGNORECASE,
 )
+_LACP_INTERFACE_RE = re.compile(
+    r"\b(?:interface|port-channel|portchannel|bundle-ether)\s+([^,\s:]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,12 @@ class ObservationNormalizer:
         )
 
     def _observed_object(self, message: SyslogMessage) -> tuple[str, float, str | None]:
+        if _is_lacp_event(message) and (match := _LACP_INTERFACE_RE.search(message.message)):
+            interface_id = self._resolve_interface_id(message.hostname, match.group(1))
+            session = self._topology.lacp_session_for_interface(message.hostname, interface_id)
+            if session is not None:
+                return session, 0.9, None
+
         if match := _INTERFACE_STATE_RE.search(message.message):
             interface_id = self._resolve_interface_id(message.hostname, match.group(1))
             return (
@@ -122,6 +132,11 @@ def _is_bgp_event(message: SyslogMessage) -> bool:
 def _is_ospf_event(message: SyslogMessage) -> bool:
     signature = message.normalized_signature or message.event_type or ""
     return "%OSPF" in signature.upper() or "%OSPF" in message.message.upper() or "RPD_OSPF" in message.message.upper()
+
+
+def _is_lacp_event(message: SyslogMessage) -> bool:
+    signature = message.normalized_signature or message.event_type or ""
+    return "%LACP" in signature.upper() or "%LACP" in message.message.upper()
 
 
 def _assertion_for(message: SyslogMessage) -> str:

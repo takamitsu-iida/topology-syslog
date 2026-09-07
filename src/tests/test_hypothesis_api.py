@@ -1,7 +1,50 @@
 import time
 from fastapi.testclient import TestClient
+import yaml
 
 from topology_syslog.api.main import create_app
+
+
+def test_hypothesis_ingest_persists_lacp_impact_as_child_incident(tmp_path):
+    topology_path = tmp_path / "lacp-topology.yaml"
+    topology_path.write_text(yaml.safe_dump({
+        "network-model": {
+            "physical-layer": {
+                "device": [
+                    {"device-id": "Spine1", "interface": [{"interface-id": "GigabitEthernet0/0"}]},
+                    {"device-id": "Leaf1", "interface": [{"interface-id": "Port-channel1"}]},
+                ],
+                "physical-connection": [],
+            },
+            "layer3-layer": {
+                "lacp-session": [{
+                    "session-id": "Leaf1-Port-channel1",
+                    "endpoint": [{"device-id": "Leaf1", "interface-id": "Port-channel1"}],
+                }],
+            },
+        },
+    }))
+    app = create_app(
+        database_url="sqlite:///:memory:",
+        topology_path=str(topology_path),
+        topology_source="iida-yaml",
+        knowledge_path="configs/syslog_knowledge",
+        syslog_port=0,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/ingest", json={"messages": [{
+            "source_ip": "127.0.0.1",
+            "raw": "<36>Sep 5 08:13:06.021 Leaf1 %LACP-4-PORTCHANNEL: Interface Port-channel1, changed state to down",
+        }]})
+        incidents = client.get("/incidents?include_children=true").json()["incidents"]
+
+    assert response.status_code == 200
+    parent = next(incident for incident in incidents if incident["relationship_type"] == "root")
+    child = next(incident for incident in incidents if incident["relationship_type"] == "impact")
+    assert parent["child_incident_ids"] == [child["incident_id"]]
+    assert child["parent_incident_id"] == parent["incident_id"]
+    assert child["root_cause_object"] == "LACPSession:Leaf1-Port-channel1"
 
 
 def test_hypothesis_ingest_creates_new_incident_for_different_leaf2_link_after_recovery():
