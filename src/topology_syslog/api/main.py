@@ -158,8 +158,7 @@ async def _persist_impact_children(app: FastAPI, parent, projected, observation)
 
 
 async def _process_message_immediately(app: FastAPI, msg) -> list:
-    if app.state.syslog_filter.is_ignored(msg):
-        return []
+    ignored = app.state.syslog_filter.is_ignored(msg)
 
     matcher = app.state.knowledge_matcher
     rule = None
@@ -171,6 +170,9 @@ async def _process_message_immediately(app: FastAPI, msg) -> list:
     if matcher is not None and msg.knowledge_status == "unknown":
         await asyncio.to_thread(app.state.unknown_event_store.record, msg)
     await asyncio.to_thread(app.state.raw_log_store.record, msg)
+    if ignored:
+        _logger.debug("Retaining ignored SYSLOG without inference: %s", msg.message[:80])
+        return []
     if should_skip_inference(classification_result):
         _logger.debug("Retaining SYSLOG without inference: signature=%s", msg.normalized_signature)
         return []
@@ -505,7 +507,7 @@ def create_app(
         transport = None
         try:
             transport = await start_receiver(
-                syslog_host, syslog_port, syslog_queue, app.state.syslog_filter
+                syslog_host, syslog_port, syslog_queue
             )
             _logger.info("Syslog UDP receiver listening on %s:%s", syslog_host, syslog_port)
         except OSError as exc:

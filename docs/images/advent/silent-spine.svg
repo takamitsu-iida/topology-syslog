@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">Silent peer failure</title>
+  <desc id="desc">Three leaf devices report losing the same silent spine device, making the spine the likely root cause.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172033"/>
+      <stop offset="1" stop-color="#24314d"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="960" height="480" rx="28" fill="url(#bg)"/>
+  <text x="48" y="64" fill="#f4f7f6" font-family="system-ui, sans-serif" font-size="24" font-weight="700">The silence is also evidence.</text>
+
+  <g fill="none" stroke="#6f7e9a" stroke-width="5" stroke-linecap="round" stroke-dasharray="10 10">
+    <path d="M258 150L620 237"/>
+    <path d="M258 240h362"/>
+    <path d="M258 330l362-87"/>
+  </g>
+  <g font-family="system-ui, sans-serif">
+    <g transform="translate(82 112)">
+      <rect width="176" height="76" rx="16" fill="#f7f9fc"/>
+      <circle cx="28" cy="38" r="10" fill="#ef6b73"/>
+      <text x="50" y="34" fill="#27344e" font-size="18" font-weight="750">Leaf1</text>
+      <text x="50" y="56" fill="#ef6b73" font-size="14">Spine1 down!</text>
+    </g>
+    <g transform="translate(82 202)">
+      <rect width="176" height="76" rx="16" fill="#f7f9fc"/>
+      <circle cx="28" cy="38" r="10" fill="#ef6b73"/>
+      <text x="50" y="34" fill="#27344e" font-size="18" font-weight="750">Leaf2</text>
+      <text x="50" y="56" fill="#ef6b73" font-size="14">Spine1 down!</text>
+    </g>
+    <g transform="translate(82 292)">
+      <rect width="176" height="76" rx="16" fill="#f7f9fc"/>
+      <circle cx="28" cy="38" r="10" fill="#ef6b73"/>
+      <text x="50" y="34" fill="#27344e" font-size="18" font-weight="750">Leaf3</text>
+      <text x="50" y="56" fill="#ef6b73" font-size="14">Spine1 down!</text>
+    </g>
+  </g>
+
+  <g transform="translate(620 145)">
+    <circle cx="100" cy="95" r="96" fill="#ef6b73" opacity=".14" filter="url(#glow)"/>
+    <rect x="22" y="56" width="156" height="98" rx="18" fill="#35415a" stroke="#ef6b73" stroke-width="4"/>
+    <circle cx="52" cy="86" r="7" fill="#66738d"/>
+    <circle cx="77" cy="86" r="7" fill="#66738d"/>
+    <path d="M48 124h104" stroke="#66738d" stroke-width="7" stroke-linecap="round"/>
+    <text x="100" y="190" text-anchor="middle" fill="#f4f7f6" font-family="system-ui, sans-serif" font-size="24" font-weight="800">Spine1</text>
+    <text x="100" y="221" text-anchor="middle" fill="#ef6b73" font-family="system-ui, sans-serif" font-size="18">no message</text>
+  </g>
+
+  <g transform="translate(821 105)">
+    <path d="M0 28c0-15 12-28 28-28h33c15 0 28 13 28 28v21c0 15-13 28-28 28H48L29 96l3-19h-4C12 77 0 64 0 49z" fill="#f2c94c"/>
+    <text x="44" y="48" text-anchor="middle" fill="#172033" font-family="system-ui, sans-serif" font-size="24" font-weight="900">...</text>
+  </g>
+</svg>

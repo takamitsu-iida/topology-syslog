@@ -28,6 +28,7 @@ dev = [
 [project.scripts]
 topology-syslog = "topology_syslog.__main__:main"
 topology-syslog-node-monitor = "topology_syslog.node_monitor.__main__:main"
+topology-syslog-collect = "topology_syslog.collection.cml_fault_collector:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

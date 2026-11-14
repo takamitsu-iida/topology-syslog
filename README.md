@@ -487,6 +487,60 @@ pytest -q \
 
 ---
 
+## CML 障害データ収集
+
+`topology-syslog-collect` は稼働中の CML ラボへノード障害・リンク障害を
+ランダムに注入し、正解ラベル、SKB 分類済み SYSLOG、生成された Incident、
+復旧ログを JSON Lines 形式で保存します。注入対象は
+`configs/ospf/yang_topology.yaml` の device と physical-connection に限定されるため、
+Ubuntu、管理 LAN、外部接続は停止しません。
+
+CML コントローラーと互換性のある `virl2-client` をインストールしてください。
+
+```bash
+uv pip install virl2-client
+```
+
+`.env` に CML 接続情報と収集先 API を設定し、OSPF トポロジーでバックエンドを
+起動します。
+
+```text
+CML_URL=https://your-cml-server
+CML_USERNAME=admin
+CML_PASSWORD=your_password
+CML_VERIFY_SSL=false
+COLLECTOR_API_URL=http://127.0.0.1:8080
+TOPOLOGY_PATH=configs/ospf/yang_topology.yaml
+SKB_PATH=configs/syslog_knowledge
+```
+
+稼働中の CML lab ID を指定して収集します。
+
+```bash
+topology-syslog-collect \
+  --lab-id <CML_LAB_ID> \
+  --samples 1000 \
+  --output data/cml_fault_samples.jsonl
+```
+
+各試行では障害注入後30秒、復旧後60秒のログを収集します。OSPF収束時間に応じて
+`--fault-window-sec` と `--recovery-window-sec` を調整できます。出力は1試行ごとに
+同期書き込みされ、同じファイルを指定すると完了サンプル数から再開します。
+障害注入後は例外や中断が発生した場合も対象の復旧を試みます。
+
+主な出力フィールド:
+
+| フィールド | 内容 |
+|---|---|
+| `fault.ground_truth_object` | `Device:*` または `PhysicalLink:*` の正解 |
+| `fault.ground_truth_nodes` | 正解ノード。リンク障害では両端ノード |
+| `fault_logs` | 障害観測期間のSKB分類済みRaw SYSLOG |
+| `recovery_logs` | 復旧観測期間のSKB分類済みRaw SYSLOG |
+| `incidents` | 障害観測期間に生成・更新されたIncident |
+| `quality` | ログ有無、Incident生成有無、SKB分類状態 |
+
+---
+
 ## 実用性の見方
 
 1. `make restart` で hypothesis 経路を起動します。

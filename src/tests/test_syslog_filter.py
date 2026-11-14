@@ -70,7 +70,7 @@ def test_from_file_skips_comments_and_blank_lines():
 # ---- API 経由のフィルター統合テスト ---------------------------------------
 
 def test_ingest_filters_ignored_messages(client, app):
-    """POST /ingest で無視パターンに一致するメッセージがインシデントを生成しない。"""
+    """無視パターンはログを保持しつつインシデント生成だけを抑止する。"""
     # app.state.syslog_filter にカスタムパターンを上書き
     app.state.syslog_filter = SyslogFilter(
         ["%SYS-5-CONFIG_I", "%SYS-5-LOG_CONFIG_CHANGE"],
@@ -84,6 +84,7 @@ def test_ingest_filters_ignored_messages(client, app):
     ]})
     assert resp.status_code == 200
     assert resp.json() == []
+    assert app.state.raw_log_store.count() == 2
 
 
 def test_ingest_passes_non_ignored_messages(client):

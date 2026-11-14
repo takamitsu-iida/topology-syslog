@@ -75,6 +75,25 @@ def test_raw_logs_identify_logs_included_in_incidents(client, app):
     assert logs_by_message[recovery_message]["recovery_event"] is True
 
 
+def test_raw_logs_after_id_returns_ascending_cursor_page(client, app):
+    for second in range(3):
+        app.state.raw_log_store.record(parse(
+            f"<34>Aug 16 10:00:0{second} r1 message-{second}".encode(),
+            "10.0.0.1",
+        ))
+
+    response = client.get("/raw-logs", params={"after_id": 1, "limit": 2})
+
+    assert response.status_code == 200
+    assert [log["log_id"] for log in response.json()["logs"]] == [2, 3]
+
+
+def test_raw_logs_rejects_negative_cursor(client):
+    response = client.get("/raw-logs", params={"after_id": -1})
+
+    assert response.status_code == 422
+
+
 # ---- /incidents/{id} ---------------------------------------------------
 
 def test_get_incident_found(client, app):

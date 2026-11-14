@@ -62,6 +62,7 @@ class RawLogStore:
         self,
         *,
         limit: int = 100,
+        after_id: int | None = None,
         hostname: str | None = None,
         classification: str | None = None,
         action: str | None = None,
@@ -77,8 +78,13 @@ class RawLogStore:
                 stmt = stmt.where(_RawLogRow.event_action == action)
             if knowledge_status:
                 stmt = stmt.where(_RawLogRow.knowledge_status == knowledge_status)
+            if after_id is not None:
+                stmt = stmt.where(_RawLogRow.log_id > after_id)
+                order_by = (_RawLogRow.log_id,)
+            else:
+                order_by = (desc(_RawLogRow.received_at), desc(_RawLogRow.log_id))
             rows = session.scalars(
-                stmt.order_by(desc(_RawLogRow.received_at), desc(_RawLogRow.log_id)).limit(limit)
+                stmt.order_by(*order_by).limit(limit)
             ).all()
             return [_from_row(row) for row in rows]
 

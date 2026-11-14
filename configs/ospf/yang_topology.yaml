@@ -29,6 +29,9 @@ network-model:
           - interface-id: "GigabitEthernet0/2"
             description: "To Leaf3"
             ip-address: "10.1.13.1/30"
+          - interface-id: "GigabitEthernet0/3"
+            description: "OOB Management"
+            ip-address: "192.168.100.11/24"
 
       - device-id: "Spine2"
         device-name: "Spine2"
@@ -47,6 +50,9 @@ network-model:
           - interface-id: "GigabitEthernet0/2"
             description: "To Leaf3"
             ip-address: "10.2.13.1/30"
+          - interface-id: "GigabitEthernet0/3"
+            description: "OOB Management"
+            ip-address: "192.168.100.12/24"
 
       # ── Leaf 層 ──────────────────────────────────────────────────────────
       - device-id: "Leaf1"
@@ -65,8 +71,8 @@ network-model:
             description: "Uplink to Spine2"
             ip-address: "10.2.11.2/30"
           - interface-id: "GigabitEthernet0/2"
-            description: "To Ubuntu"
-            ip-address: "192.168.100.2/30"
+            description: "OOB Management"
+            ip-address: "192.168.100.21/24"
 
       - device-id: "Leaf2"
         device-name: "Leaf2"
@@ -82,6 +88,9 @@ network-model:
           - interface-id: "GigabitEthernet0/1"
             description: "Uplink to Spine2"
             ip-address: "10.2.12.2/30"
+          - interface-id: "GigabitEthernet0/2"
+            description: "OOB Management"
+            ip-address: "192.168.100.22/24"
 
       - device-id: "Leaf3"
         device-name: "Leaf3"
@@ -97,6 +106,9 @@ network-model:
           - interface-id: "GigabitEthernet0/1"
             description: "Uplink to Spine2"
             ip-address: "10.2.13.2/30"
+          - interface-id: "GigabitEthernet0/2"
+            description: "OOB Management"
+            ip-address: "192.168.100.23/24"
 
     physical-connection:
       # Spine1 アップリンク
@@ -176,3 +188,36 @@ network-model:
         endpoint:
           - device-id: "Spine2"
           - device-id: "Leaf3"
+
+  management:
+    device-management:
+      - device-id: "Spine1"
+        out-of-band:
+          enabled: true
+          interface-id: "GigabitEthernet0/3"
+          ip-address: "192.168.100.11"
+          prefix-length: 24
+      - device-id: "Spine2"
+        out-of-band:
+          enabled: true
+          interface-id: "GigabitEthernet0/3"
+          ip-address: "192.168.100.12"
+          prefix-length: 24
+      - device-id: "Leaf1"
+        out-of-band:
+          enabled: true
+          interface-id: "GigabitEthernet0/2"
+          ip-address: "192.168.100.21"
+          prefix-length: 24
+      - device-id: "Leaf2"
+        out-of-band:
+          enabled: true
+          interface-id: "GigabitEthernet0/2"
+          ip-address: "192.168.100.22"
+          prefix-length: 24
+      - device-id: "Leaf3"
+        out-of-band:
+          enabled: true
+          interface-id: "GigabitEthernet0/2"
+          ip-address: "192.168.100.23"
+          prefix-length: 24

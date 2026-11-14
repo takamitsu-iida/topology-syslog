@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from topology_syslog.api.schemas import RawLogListOut, RawLogOut
 
@@ -14,15 +14,19 @@ router = APIRouter(prefix="/raw-logs", tags=["raw-logs"])
 def list_raw_logs(
     request: Request,
     limit: int = 100,
+    after_id: int | None = None,
     hostname: str | None = None,
     classification: str | None = None,
     action: str | None = None,
     knowledge_status: str | None = None,
 ) -> RawLogListOut:
     if not 1 <= limit <= 500:
-        limit = 100
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    if after_id is not None and after_id < 0:
+        raise HTTPException(status_code=422, detail="after_id must be non-negative")
     logs = request.app.state.raw_log_store.list_logs(
         limit=limit,
+        after_id=after_id,
         hostname=hostname,
         classification=classification,
         action=action,
